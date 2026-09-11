@@ -5,6 +5,7 @@
 
 | 验证 | 证据 |
 |---|---|
+| 可选官端容器启动、失败联动退出与密钥不传裁判 | `bash scripts/test-container.sh`，本地 Git Bash 通过；真实镜像待云端构建 |
 | 牌组、胡牌、计分、GameState、Local AI、RoomManager | 上游基础回归 307 passed / 1 skipped；规则文件未重写 |
 | Guest、昵称与身份分离、自己手牌、跨身份/房间拒绝、刷新与 leave/end | `backend/tests/test_guest_rooms.py`，真实 FastAPI 路由和 WS |
 | 局末拒绝新成员、错位绑定拒绝、存档失败不授予访问 | `backend/tests/test_guest_rooms.py` |

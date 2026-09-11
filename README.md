@@ -41,7 +41,8 @@ $env:MAHJONG_MCP_PORT = '8898'
 ## TEST 部署准备
 
 - 独立服务：预定 `next-mahjong`，HTTP 8080，独立持久卷 `/data`，`MAHJONG_DATA_DIR=/data/mahjong`。
-- 一个 worker、一个副本。MCP 若启用，同进程 loopback 端口 8898；隧道运行凭据不得进 Git/镜像。
+- 一个 worker、一个副本。容器同时设置 `MAHJONG_TUNNEL_ID` 和 `CONTROL_PLANE_API_KEY` 后，启动官方 0.0.14 隧道客户端（构建校验 SHA-256）并启用 loopback 8898 MCP。密钥仅传给隧道进程，不传给裁判；任一子进程退出则容器退出。两个变量都不设置时只启动游戏，只配置一个会失败。
+- `bash scripts/test-container.sh` 验证启动、失败联动退出和凭据隔离；真实镜像构建由本次 TEST 部署验证。
 - 小家 Web 只代理 `/mahjong/` 到该服务（去掉前缀），同时传递原 Host、X-Forwarded-Proto 和 WS Upgrade。
 - 由受信任的反向代理接入时配置 Uvicorn `FORWARDED_ALLOW_IPS` 为实际代理来源；不要无条件信任公网转发头。
 - **先部署并确认麻将服务 DNS/healthz/持久卷，再发布引用它的 Tidal Web。** 当前未部署，不能直接把 Web 提交推送触发自动发布。
