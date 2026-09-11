@@ -39,6 +39,8 @@ async def lifespan(app):
                 from starlette.responses import Response
                 if request.headers.get('host') != f'127.0.0.1:{port}' or request.headers.get('origin'):
                     return Response(status_code=403)
+                if request.url.path != '/mcp':
+                    return Response(status_code=404)
                 if request.method != 'POST':
                     return Response(status_code=405)
                 return await call_next(request)

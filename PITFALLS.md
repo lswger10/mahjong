@@ -24,3 +24,4 @@
 - Zeabur SPA 的 Not Deployed/空日志可能滞后；先重新打开原服务核验，不要据此新建重复服务。Arbitrary Git 创建的服务可能没有 private DNS，必须显式检查。
 - Zeabur Load from GitHub 曾加载旧 main Dockerfile；覆盖文件必须与实际施工分支比对，不能只信分支下拉框。
 - tunnel-client 0.0.14 默认会立即做 OAuth 发现，早于 Python 私有监听启动时 readyz 可持续失败。使用客户端原生 `--mcp.startup-wait-timeout 30s` 等待；这是单次启动门槛，不是陪玩时长，也不引入 worker。
+- 私有监听只实现 `/mcp`；其他路径（包含 OAuth metadata）必须返回 404。把所有 GET 一律改成空 405 会让隧道把“未配置 OAuth”误判成发现失败。Host/Origin 检查仍在路径判断之前，`/mcp` 仍仅接受 POST。

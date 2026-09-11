@@ -7,6 +7,7 @@
 |---|---|
 | 可选官端容器启动、原生监听等待、失败联动退出与密钥不传裁判 | `bash scripts/test-container.sh`；启动等待断言旧代码失败，修复后通过。9128584 已云端构建运行，修复待复验 |
 | TEST 游戏健康、持久卷与实际 Web 私网访问 | 部署 6aa40b41c105f1543504cac1；8080 healthz 返回 ok；/data 挂载；Web 容器访问 private DNS healthz 成功 |
+| 私有 MCP 未实现的 OAuth 地址返回 404 | `node tests/browser.mjs`；旧返回 405 时失败，修复后双浏览器、隔离、重启、TCP MCP 与娱乐室回归全部通过 |
 | 牌组、胡牌、计分、GameState、Local AI、RoomManager | 上游基础回归 307 passed / 1 skipped；规则文件未重写 |
 | Guest、昵称与身份分离、自己手牌、跨身份/房间拒绝、刷新与 leave/end | `backend/tests/test_guest_rooms.py`，真实 FastAPI 路由和 WS |
 | 局末拒绝新成员、错位绑定拒绝、存档失败不授予访问 | `backend/tests/test_guest_rooms.py` |

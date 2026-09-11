@@ -40,6 +40,10 @@ async function stop() {
 
 try {
   await start();
+  // Missing OAuth metadata is 404, not an empty 405 that fails tunnel discovery.
+  for (const route of ['/', '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+    assert.equal((await fetch(`http://127.0.0.1:${mcpPort}${route}`)).status,404);
+  }
   // Native test-only prefix proxy exercises /mahjong/ URLs and WS upgrades.
   proxy=http.createServer((req,res)=>{
     if(req.url.startsWith('/mahjong/')) {
