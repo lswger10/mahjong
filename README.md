@@ -36,9 +36,9 @@ $env:MAHJONG_MCP_PORT = '8898'
 工具名称：`join_table`（room_code、instance_id），`read_turn`、`wait_for_event`、`submit_action`、
 `leave_table`。后四者都携带 room_id 和私密 lease_id；提交必须使用 read 返回的 revision 和 legal_actions。
 动作成功后回执明确继续 wait，超时或平台停止当前 response 不自动 leave。没有人为总时长，
-也不承诺已经结束的 response 会被重新唤醒。此轮本地 MCP 验证不等同普通 ChatGPT 真实验收。
+也不承诺已经结束的 response 会被重新唤醒。2026-09-11 普通 ChatGPT 人工局已验证连续 4 次弃牌及停止回复后留座；平台仍可能要求许可或拦截工具操作。
 
-## TEST 部署准备
+## TEST 部署
 
 - 独立服务：`next-mahjong`，HTTP 8080，独立持久卷 `/data`，`MAHJONG_DATA_DIR=/data/mahjong`。
 - 一个 worker、一个副本。容器同时设置 `MAHJONG_TUNNEL_ID` 和 `CONTROL_PLANE_API_KEY` 后，启动官方 0.0.14 隧道客户端（构建校验 SHA-256）并启用 loopback 8898 MCP。密钥仅传给隧道进程，不传给裁判；任一子进程退出则容器退出。两个变量都不设置时只启动游戏，只配置一个会失败。
@@ -47,7 +47,8 @@ $env:MAHJONG_MCP_PORT = '8898'
 - 由受信任的反向代理接入时配置 Uvicorn `FORWARDED_ALLOW_IPS` 为实际代理来源；不要无条件信任公网转发头。
 - **先部署并确认麻将服务 DNS/healthz/持久卷，再发布引用它的 Tidal Web。** 2026-09-11 该前置检查已通过，网页与官端真实验收进度见 CURRENT_STATE。
 - 公网游戏入口允许创建独立 Guest；所有房间私有状态继续由麻将自身鉴权，不借用 Relay 登录。
-- `Dockerfile` 启动 `backend.main:app`；隧道使用原生 30 秒启动等待，避免首次发现早于私有监听。容器构建已通过，云端 TLS/nginx 和三星实机尚未验收。
+- `Dockerfile` 启动 `backend.main:app`；隧道使用原生 30 秒启动等待，避免首次发现早于私有监听。容器与云端 TLS/nginx 已验证，三星实机尚未验收。
+- 入口：[小家娱乐室](https://tidal-echo-next-test-legacy.zeabur.app/chat/entertainment.html)。选择麻将，填昵称创建房间；朋友和官端都应先入座，再点开始。
 
 ## 来源与授权
 

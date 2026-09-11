@@ -30,6 +30,7 @@
 没有固定总陪玩时长，没有自动离席；只有明确 leave 撤销自己的访问。
 工具回执携带最新 revision/cursor/last_event_id，成功提交后明确转到 wait。
 平台终止 response 只终止正在执行的工具链，不能保证后来自动唤醒。
+部署采用同容器官方 tunnel-client 的原生启动等待；缺失 OAuth 路径返回 404，不增加 OAuth 服务或自制启动轮询。隧道仍只访问回环 MCP，公网游戏仅使用 Guest 身份。
 
 ## 用户可见安全文案
 

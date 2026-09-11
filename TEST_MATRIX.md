@@ -7,6 +7,9 @@
 |---|---|
 | 可选官端容器启动、原生监听等待、失败联动退出与密钥不传裁判 | `bash scripts/test-container.sh`；启动等待断言旧代码失败，修复后通过。9128584 已云端构建运行，修复待复验 |
 | TEST 游戏健康、持久卷与实际 Web 私网访问 | 部署 6aa40b41c105f1543504cac1；8080 healthz 返回 ok；/data 挂载；Web 容器访问 private DNS healthz 成功 |
+| 最终 TEST 容器、隧道与工具发现 | 53fcd8a / 部署 6aa413c6c105f1543504cbd0，readyz=ready；ChatGPT 连接并列出 5 个真实工具 |
+| 公网双独立 Edge 与实际 nginx/TLS | 两个全新上下文经邀请 UI 入座；自己的 HTTP/WSS 手牌；Secure/HttpOnly/Strict Cookie；伪造身份、跨房间、跨 Origin 拒绝；刷新原座；一边断开另一边继续；0 页面错误。人工房间结束 |
+| 普通 ChatGPT 同一回复持续陪玩与取消留座 | 仅一次开始消息；先连续 wait，再 read/submit/wait，官端实际弃牌 4 次；revision 53。停止回答后 revision 53 与 official_left=false 保持；房主随后关闭，revision 54。期间有平台许可/安全检查暂停，不证明永不拦截 |
 | 私有 MCP 未实现的 OAuth 地址返回 404 | `node tests/browser.mjs`；旧返回 405 时失败，修复后双浏览器、隔离、重启、TCP MCP 与娱乐室回归全部通过 |
 | 牌组、胡牌、计分、GameState、Local AI、RoomManager | 上游基础回归 307 passed / 1 skipped；规则文件未重写 |
 | Guest、昵称与身份分离、自己手牌、跨身份/房间拒绝、刷新与 leave/end | `backend/tests/test_guest_rooms.py`，真实 FastAPI 路由和 WS |
@@ -41,5 +44,5 @@ node tests/browser.mjs
 根 `conftest.py` 强制测试使用自己的 TemporaryDirectory；浏览器测试只启动/停止自己的 Python 子进程，
 并核对其临时目录边界再删除。不会读取应用 data、调用云模型或操作用户正在玩的房间。
 
-未验收：普通 ChatGPT、Secure MCP Tunnel readyz/工具链、朋友跨公网邀请、真实 nginx/TLS、三星实机。单副本设计，不支持多副本。
+未验收：三星实机、真正不同设备/网络的朋友体验。已验收真实公网路径上的双独立浏览器、nginx/TLS、普通 ChatGPT 与隧道；单副本设计，不支持多副本。
 仓库原来已有一个 skipped 基础测试，本轮没有新增跳过或放宽牌规断言。
