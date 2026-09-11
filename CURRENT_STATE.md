@@ -16,7 +16,7 @@ TEST 代码 `53fcd8a` 已推送用户 Fork 的 `codex/mahjong-game-room` 并部�
 - 验收期间 ChatGPT 出现工具许可/安全检查暂停，使用仅本次人工对话的许可后继续；未设置全局始终允许。不能承诺平台永不拦截、无限 response 或结束回复后自动唤醒。
 - 实际 Web pod 为 10.42.0.66，所属路由 10.42.0.0/24；`FORWARDED_ALLOW_IPS=127.0.0.1,10.42.0.0/24`。服务仍为单副本；有限崩溃重启次数设为 5。
 - 用户已完成 GitHub 重新身份确认与麻将仓库授权，Zeabur 仓库列表和已保存分支均已核验。
-- Web 已发布麻将入口和代理，Tidal 推送也触发同分支服务部署；未修改核心聊天代码。旧斗地主服务、隧道、席位和数据库未迁移或重启。
+- Web 已发布麻将入口和代理，Tidal 推送也触发同分支服务部署；未修改核心聊天代码。麻将步骤没有迁移旧斗地主；后续斗地主发布状态见下表。
 代码和证据随本轮本地提交保存。保留施工分支用于后续审阅/发布，不删除上游历史。
 
 ## 已实现的用户行为
@@ -35,8 +35,8 @@ TEST 代码 `53fcd8a` 已推送用户 Fork 的 `codex/mahjong-game-room` 并部�
 | 组件 | 代码与分支 | 本轮验证 | 部署状态 |
 |---|---|---|---|
 | Mahjong | `codex/mahjong-game-room@53fcd8a` | 本地回归、公网双 Edge HTTP/WSS、普通 ChatGPT 人工陪玩 | TEST 已部署并验证 |
-| Tidal Web | `feat/gateway-model-execution-cache@7c89a7f` | 卡片/iframe、HTTPS Cookie/Origin、SW v36、实际邀请与 WSS | TEST 部署 6aa41277c105f1543504cb87 |
-| 独立斗地主 | `codex/guest-rooms@5c75cb9` | 原 `npm test` 全套复跑通过 | 本轮未推送/部署；原线上版本未重查 |
+| Tidal Web | `feat/gateway-model-execution-cache@1ee5fd4` | 保留麻将代理，开放已迁移斗地主 Guest 路径，SW v37；两种游戏公网健康 200 | TEST 部署 6aa420ccc105f1543504cce1 |
+| 独立斗地主 | `codex/guest-rooms@e1b2b7c` | 原完整回归、房主迁移、公开双浏览器/双房间验收通过 | TEST 已部署；细节归其 CURRENT_STATE / TEST_MATRIX |
 | Relay / Orchestrator / Gateway / PostgreSQL | 核心代码未修改 | Relay 公网健康 200；本轮不做聊天/记忆验收 | Relay 随 Tidal 推送部署且 Running；其余部署版本不据此推断 |
 
 ## Owner 与数据
@@ -53,7 +53,7 @@ TEST 代码 `53fcd8a` 已推送用户 Fork 的 `codex/mahjong-game-room` 并部�
 ## 剩余边界
 
 1. 三星实机尚未验证；已通过 412px 手机视口的独立 Edge 测试，不等同真机。
-2. 斗地主多人 Phase 1 仍在本地：旧单桌身份与数据迁移门槛未处理，不在麻将发布时顺带替换正在使用的服务。
+2. 斗地主多人 Phase 1 已在后续独立步骤部署：确认大厅无官端占座后备份、绑定原房主，再开放朋友入口。不得用麻将文档复制管理它的房间/席位真相。
 3. 安全/权限/邀请错误仍使用 message key；最终产品文案尚未定稿。
 4. 此次文档收尾与已部署代码分开提交；不为文档更新重启正在使用的服务。
 

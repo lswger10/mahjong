@@ -5,7 +5,7 @@
 
 | 验证 | 证据 |
 |---|---|
-| 可选官端容器启动、原生监听等待、失败联动退出与密钥不传裁判 | `bash scripts/test-container.sh`；启动等待断言旧代码失败，修复后通过。9128584 已云端构建运行，修复待复验 |
+| 可选官端容器启动、原生监听等待、失败联动退出与密钥不传裁判 | `bash scripts/test-container.sh`；启动等待断言旧代码失败，修复后通过。最终 53fcd8a 云端 readyz 与普通 ChatGPT 验收通过 |
 | TEST 游戏健康、持久卷与实际 Web 私网访问 | 部署 6aa40b41c105f1543504cac1；8080 healthz 返回 ok；/data 挂载；Web 容器访问 private DNS healthz 成功 |
 | 最终 TEST 容器、隧道与工具发现 | 53fcd8a / 部署 6aa413c6c105f1543504cbd0，readyz=ready；ChatGPT 连接并列出 5 个真实工具 |
 | 公网双独立 Edge 与实际 nginx/TLS | 两个全新上下文经邀请 UI 入座；自己的 HTTP/WSS 手牌；Secure/HttpOnly/Strict Cookie；伪造身份、跨房间、跨 Origin 拒绝；刷新原座；一边断开另一边继续；0 页面错误。人工房间结束 |
