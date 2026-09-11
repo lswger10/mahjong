@@ -5,7 +5,8 @@
 
 | 验证 | 证据 |
 |---|---|
-| 可选官端容器启动、失败联动退出与密钥不传裁判 | `bash scripts/test-container.sh`，本地 Git Bash 通过；真实镜像待云端构建 |
+| 可选官端容器启动、原生监听等待、失败联动退出与密钥不传裁判 | `bash scripts/test-container.sh`；启动等待断言旧代码失败，修复后通过。9128584 已云端构建运行，修复待复验 |
+| TEST 游戏健康、持久卷与实际 Web 私网访问 | 部署 6aa40b41c105f1543504cac1；8080 healthz 返回 ok；/data 挂载；Web 容器访问 private DNS healthz 成功 |
 | 牌组、胡牌、计分、GameState、Local AI、RoomManager | 上游基础回归 307 passed / 1 skipped；规则文件未重写 |
 | Guest、昵称与身份分离、自己手牌、跨身份/房间拒绝、刷新与 leave/end | `backend/tests/test_guest_rooms.py`，真实 FastAPI 路由和 WS |
 | 局末拒绝新成员、错位绑定拒绝、存档失败不授予访问 | `backend/tests/test_guest_rooms.py` |
@@ -39,5 +40,5 @@ node tests/browser.mjs
 根 `conftest.py` 强制测试使用自己的 TemporaryDirectory；浏览器测试只启动/停止自己的 Python 子进程，
 并核对其临时目录边界再删除。不会读取应用 data、调用云模型或操作用户正在玩的房间。
 
-未验收：普通 ChatGPT、Secure MCP Tunnel 上云、朋友跨公网邀请、真实 nginx/TLS、三星实机、容器构建与多副本。
+未验收：普通 ChatGPT、Secure MCP Tunnel readyz/工具链、朋友跨公网邀请、真实 nginx/TLS、三星实机。单副本设计，不支持多副本。
 仓库原来已有一个 skipped 基础测试，本轮没有新增跳过或放宽牌规断言。

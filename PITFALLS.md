@@ -11,7 +11,7 @@
 - MCP 私有端口和网页端口在同一进程内共享 RoomManager。另起一个 MCP Python 进程会制造第二个内存裁判。
 - 120 秒是活跃控制器互斥保护，不是陪玩总时限。wait 每次最多 15 秒，不自动结束整条 response。
 - 上游 README/CLAUDE 后半部分属于 bd3842b 历史说明，其中“无鉴权/纯内存/自动 AI 接管”不适用于本分支。
-- Tidal nginx 新配置引用 `next-mahjong.zeabur.internal`。未先建好这个服务就发布 Web，nginx 可能因 DNS 解析失败启动不了；本轮没有推送触发部署。
+- Tidal nginx 新配置引用 `next-mahjong.zeabur.internal`。未先建好这个服务就发布 Web，nginx 可能因 DNS 解析失败启动不了；需从实际 Web 容器验证 DNS/健康。
 - 测试的 Host/Origin、Cookie、前缀转发已在本地验证；尚未证明 Zeabur HTTPS 或普通 ChatGPT 实测通过。
 
 - 局末不能新加入旧 AI 的索引；view 还必须校验 GameState player.id 与身份相符。首次开局以后只有原成员恢复。
@@ -21,3 +21,6 @@
 - 存档失败冻结当前房间，不继续暴露未落盘状态。首次官端入座成员和 lease 必须同一次落盘；分两次会留下僵尸席位。
 
 - 浏览器验收不能假设“出牌后一定轮到下家”；AI 碰/杠会合法跳座。按实际私有快照等待稳定真人回合或自然结算。
+- Zeabur SPA 的 Not Deployed/空日志可能滞后；先重新打开原服务核验，不要据此新建重复服务。Arbitrary Git 创建的服务可能没有 private DNS，必须显式检查。
+- Zeabur Load from GitHub 曾加载旧 main Dockerfile；覆盖文件必须与实际施工分支比对，不能只信分支下拉框。
+- tunnel-client 0.0.14 默认会立即做 OAuth 发现，早于 Python 私有监听启动时 readyz 可持续失败。使用客户端原生 `--mcp.startup-wait-timeout 30s` 等待；这是单次启动门槛，不是陪玩时长，也不引入 worker。

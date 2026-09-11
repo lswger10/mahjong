@@ -9,8 +9,10 @@
 
 - TEST 项目：`6a79b1dbec01e16bfb336c60`，环境 `6a79b1db5f062718bc7b9024`。
 - 新建 Mahjong 服务：`6aa407d16c9b434a99e0bbf5`，名称 `next-mahjong`，挂载 `mahjong-data` 到 `/data`。
-- 通用 Git URL 创建后没有产生可验证构建。现已关联 GitHub App 的 `lswger10/mahjong:codex/mahjong-game-room`，解除重复的 Arbitrary Git 来源，并保存与 b236471 一致的容器定义；实际构建与运行仍待核验。
-- 独立隧道已获用户确认并创建：`tunnel_6aa4085c5ae48191a6a00b01b6818c32`；Personal 组织和原 ChatGPT 工作区。尚未配置运行密钥/连接客户端。
+- 已关联 GitHub App 的 `lswger10/mahjong:codex/mahjong-game-room`，移除 Arbitrary Git 来源；容器定义与 b236471 一致。9128584 对应部署 `6aa40b41c105f1543504cac1` 已实际运行，游戏健康接口通过。
+- `/data` 持久卷已从容器 df 核验；私有 DNS 显式设为 `next-mahjong`，实际 Web 容器访问 `http://next-mahjong.zeabur.internal:8080/healthz` 成功。尚无真人房间；误建重复服务经用户明确授权删除，保留本服务和卷。
+- 独立隧道 `tunnel_6aa4085c5ae48191a6a00b01b6818c32` 已配置；用户在安全界面填写仅 Tunnels Read+Use 的运行密钥，未读取密钥。日志确认已取到该隧道元数据，但首次 OAuth 发现早于私有 MCP 启动约 2 秒，readyz 失败；新增原生启动等待，待云端复验。
+- 实际 Web pod 为 10.42.0.66，所属路由 10.42.0.0/24；`FORWARDED_ALLOW_IPS=127.0.0.1,10.42.0.0/24`。服务仍为单副本；有限崩溃重启次数设为 5。
 - 用户已完成 GitHub 重新身份确认与麻将仓库授权，Zeabur 仓库列表和已保存分支均已核验。
 - 旧斗地主、网页、Relay 和数据库没有被重启或改变流量。
 代码和证据随本轮本地提交保存。保留施工分支用于后续审阅/发布，不删除上游历史。
@@ -30,7 +32,7 @@
 
 | 组件 | 代码与分支 | 本轮验证 | 部署状态 |
 |---|---|---|---|
-| Mahjong | 本分支；保留上游规则、AI、牌面与主要 UI | Python、前端、实际浏览器与 MCP HTTP/TCP，见 TEST_MATRIX | 未部署 |
+| Mahjong | 本分支；保留上游规则、AI、牌面与主要 UI | Python、前端、实际浏览器与 MCP HTTP/TCP，见 TEST_MATRIX | TEST 9128584 运行；隧道启动顺序修复待发布 |
 | Tidal Web | `feat/gateway-model-execution-cache`，基线 `9b523c5` | 娱乐室麻将卡片、iframe 进入/返回；前缀代理浏览器验证 | 本地待发布；必须先部署麻将服务 |
 | 独立斗地主 | `codex/guest-rooms@5c75cb9` | 原 `npm test` 全套复跑通过 | 本轮未推送/部署；原线上版本未重查 |
 | Relay / Orchestrator / Gateway / PostgreSQL | 未修改 | 本轮不验收这些核心 | 未操作 |
@@ -48,9 +50,9 @@
 
 ## 尚未完成的发布验收
 
-1. 完成真实构建；GitHub App 关联、Fork 与施工分支已核验，不得直接推上游。
-2. 验证新服务镜像、持久卷和运行状态；用户在安全配置中填写独立隧道运行密钥，启动并验证客户端。
-3. 先确认新服务 DNS/健康，再发布 Tidal nginx/网页；模板的 `next-mahjong` 地址在发布前必须存在。
+1. 发布隧道启动顺序修复并验证 readyz 与真实工具发现。
+2. 游戏健康、持久卷和 Web 到麻将的私网访问已通过；仍须验证 HTTPS Cookie/WS。
+3. 发布 Tidal nginx/网页；新服务 DNS/健康的前置门槛已通过。
 4. 实测 Zeabur nginx、HTTPS Cookie/Origin、普通 ChatGPT 连续陪玩、朋友公网邀请、三星实机。
 5. 安全/权限/邀请错误目前使用 message key；最终产品文案尚未定稿。
 

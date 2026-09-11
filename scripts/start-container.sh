@@ -30,7 +30,8 @@ env -u CONTROL_PLANE_API_KEY tunnel-client init \
   --health-listen-addr 127.0.0.1:8897
 (unset CONTROL_PLANE_API_KEY; exec python -m uvicorn backend.main:app --host 0.0.0.0 --port "${PORT:-8080}") &
 game_pid=$!
-(exec tunnel-client run --profile mahjong-seat --profile-dir "$profile_dir") &
+# Wait for the private listener before the client's one-time OAuth discovery.
+(exec tunnel-client run --profile mahjong-seat --profile-dir "$profile_dir" --mcp.startup-wait-timeout 30s) &
 tunnel_pid=$!
 # A failed child ends this container; the platform owns restart policy.
 set +e
