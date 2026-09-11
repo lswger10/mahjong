@@ -2,9 +2,17 @@
 
 2026-09-11。独立麻将子应用，来源 `zorrofox/mahjong@bd3842b37bf80460f273472f6347329cc09d6b06`。
 施工分支 `codex/mahjong-game-room`；主克隆 `D:/Workspace/mahjong`，工作树
-`D:/Workspace/tidal-echo-next/.worktrees/mahjong`。`upstream` 只指向原作者仓库，没有配置可写的用户远端。
+`D:/Workspace/tidal-echo-next/.worktrees/mahjong`。`upstream` 指向原作者仓库；`origin` 指向本轮创建的公开 Fork `lswger10/mahjong`。
 
-本轮是**本地实现与验证**，未推送、未合并、未部署云端、未连接真实 ChatGPT；没有付费模型请求。
+实现基线 `a1728df`，部署容器补充 `b236471`，均已推送用户 Fork 的 `codex/mahjong-game-room`；未合并。
+用户已授权 TEST 发布。2026-09-11 发布进行中，尚未宣布上线；没有付费模型请求。
+
+- TEST 项目：`6a79b1dbec01e16bfb336c60`，环境 `6a79b1db5f062718bc7b9024`。
+- 新建 Mahjong 服务：`6aa407d16c9b434a99e0bbf5`，名称 `next-mahjong`，挂载 `mahjong-data` 到 `/data`。
+- 通用 Git URL 创建后没有产生可验证构建。现已关联 GitHub App 的 `lswger10/mahjong:codex/mahjong-game-room`，解除重复的 Arbitrary Git 来源，并保存与 b236471 一致的容器定义；实际构建与运行仍待核验。
+- 独立隧道已获用户确认并创建：`tunnel_6aa4085c5ae48191a6a00b01b6818c32`；Personal 组织和原 ChatGPT 工作区。尚未配置运行密钥/连接客户端。
+- 用户已完成 GitHub 重新身份确认与麻将仓库授权，Zeabur 仓库列表和已保存分支均已核验。
+- 旧斗地主、网页、Relay 和数据库没有被重启或改变流量。
 代码和证据随本轮本地提交保存。保留施工分支用于后续审阅/发布，不删除上游历史。
 
 ## 已实现的用户行为
@@ -40,8 +48,8 @@
 
 ## 尚未完成的发布验收
 
-1. 在用户名下建立/选择麻将远端并发布施工分支；当前只配置原作者 `upstream`，不得直接推上游。
-2. 新建独立 TEST Mahjong 服务、持久卷及独立 Secure MCP Tunnel；隧道凭据只放安全配置。
+1. 完成真实构建；GitHub App 关联、Fork 与施工分支已核验，不得直接推上游。
+2. 验证新服务镜像、持久卷和运行状态；用户在安全配置中填写独立隧道运行密钥，启动并验证客户端。
 3. 先确认新服务 DNS/健康，再发布 Tidal nginx/网页；模板的 `next-mahjong` 地址在发布前必须存在。
 4. 实测 Zeabur nginx、HTTPS Cookie/Origin、普通 ChatGPT 连续陪玩、朋友公网邀请、三星实机。
 5. 安全/权限/邀请错误目前使用 message key；最终产品文案尚未定稿。
