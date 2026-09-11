@@ -25,7 +25,7 @@ class TestCreateRoom:
         assert "id" in data
         assert "name" in data
         assert data["status"] == "waiting"
-        assert data["player_count"] == 0
+        assert data["player_count"] == 1
         assert data["max_players"] == 4
 
     def test_creates_room_custom_name(self, client):
@@ -44,7 +44,7 @@ class TestCreateRoom:
 class TestJoinRoom:
     def test_join_room(self, client):
         room_id = client.post("/api/rooms").json()["id"]
-        resp = client.post(f"/api/rooms/{room_id}/join", json={"player_id": "p1"})
+        resp = client.post(f"/api/rooms/{room_id}/join", json={})
         assert resp.status_code == 200
         data = resp.json()
         assert data["room_id"] == room_id
@@ -52,39 +52,40 @@ class TestJoinRoom:
         assert data["was_redirected"] is False
 
     def test_join_room_multiple_players(self, client):
-        room_id = client.post("/api/rooms").json()["id"]
-        for i in range(4):
-            resp = client.post(f"/api/rooms/{room_id}/join", json={"player_id": f"p{i}"})
-            assert resp.status_code == 200
-            assert resp.json()["player_idx"] == i
+        room_id = client.post('/api/rooms').json()['id']
+        for i in range(1, 4):
+            client.cookies.clear()
+            client.post('/api/guest', json={})
+            response = client.post(f'/api/rooms/{room_id}/join', json={})
+            assert response.status_code == 200
+            assert response.json()['player_idx'] == i
 
     def test_join_room_idempotent(self, client):
         room_id = client.post("/api/rooms").json()["id"]
-        client.post(f"/api/rooms/{room_id}/join", json={"player_id": "p1"})
-        resp = client.post(f"/api/rooms/{room_id}/join", json={"player_id": "p1"})
+        client.post(f"/api/rooms/{room_id}/join", json={})
+        resp = client.post(f"/api/rooms/{room_id}/join", json={})
         assert resp.status_code == 200
         assert resp.json()["player_idx"] == 0
 
-    def test_join_full_room_redirects(self, client):
-        room_id = client.post("/api/rooms").json()["id"]
-        for i in range(4):
-            client.post(f"/api/rooms/{room_id}/join", json={"player_id": f"p{i}"})
-        # 5th player triggers redirect
-        resp = client.post(f"/api/rooms/{room_id}/join", json={"player_id": "p_extra"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["was_redirected"] is True
-        assert data["room_id"] != room_id
+    def test_join_full_room_rejects(self, client):
+        room_id = client.post('/api/rooms').json()['id']
+        for i in range(3):
+            client.cookies.clear()
+            client.post('/api/guest', json={})
+            client.post(f'/api/rooms/{room_id}/join', json={})
+        client.cookies.clear()
+        client.post('/api/guest', json={})
+        assert client.post(f'/api/rooms/{room_id}/join', json={}).status_code == 409
 
     def test_join_nonexistent_room(self, client):
-        resp = client.post("/api/rooms/fake-id/join", json={"player_id": "p1"})
+        resp = client.post("/api/rooms/fake-id/join", json={})
         assert resp.status_code == 404
 
 
 class TestStartGame:
     def test_start_game(self, client):
         room_id = client.post("/api/rooms").json()["id"]
-        client.post(f"/api/rooms/{room_id}/join", json={"player_id": "p1"})
+        client.post(f"/api/rooms/{room_id}/join", json={})
         resp = client.post(f"/api/rooms/{room_id}/start")
         assert resp.status_code == 200
         data = resp.json()
@@ -93,7 +94,7 @@ class TestStartGame:
         players = data["players"]
         assert len(players) == 4
         # First player is human
-        assert players[0]["id"] == "p1"
+        assert players[0]["id"] == client.guest_id
         assert players[0]["is_ai"] is False
         # Remaining are AI
         for p in players[1:]:
@@ -101,18 +102,18 @@ class TestStartGame:
 
     def test_start_game_already_started(self, client):
         room_id = client.post("/api/rooms").json()["id"]
-        client.post(f"/api/rooms/{room_id}/join", json={"player_id": "p1"})
+        client.post(f"/api/rooms/{room_id}/join", json={})
         client.post(f"/api/rooms/{room_id}/start")
         resp = client.post(f"/api/rooms/{room_id}/start")
-        assert resp.status_code == 400
+        assert resp.status_code == 409
 
     def test_start_nonexistent_room(self, client):
         resp = client.post("/api/rooms/fake-id/start")
-        assert resp.status_code == 404
+        assert resp.status_code == 403
 
     def test_room_status_updates_after_start(self, client):
         room_id = client.post("/api/rooms").json()["id"]
-        client.post(f"/api/rooms/{room_id}/join", json={"player_id": "p1"})
+        client.post(f"/api/rooms/{room_id}/join", json={})
         # Before start
         rooms = client.get("/api/rooms").json()
         assert rooms[0]["status"] == "waiting"

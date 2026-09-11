@@ -9,6 +9,10 @@ when the game starts.
 from __future__ import annotations
 
 import uuid
+import json
+from pathlib import Path
+from dataclasses import asdict
+from .game_state import PlayerState
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -43,6 +47,12 @@ class Room:
     dealer_advances: int = 0  # total dealer changes; every 4 advances = one wind round
     last_chip_changes: dict = field(default_factory=dict)  # player_id → chip delta for last round
 
+    owner_id: str = ""
+    members: dict = field(default_factory=dict)
+    official: dict = field(default_factory=dict)
+    ai_fill: bool = True
+    revision: int = 0
+
     @property
     def player_count(self) -> int:
         return len(self.human_players)
@@ -72,8 +82,45 @@ class RoomManager:
     (single-threaded event loop), so no locking is applied.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir=None) -> None:
         self._rooms: dict[str, Room] = {}
+        self.data_dir = Path(data_dir) if data_dir is not None else None
+        if self.data_dir and self.data_dir.exists():
+            for path in self.data_dir.glob('*.json'):
+                data = json.loads(path.read_text('utf-8'))
+                state = data.pop('game_state')
+                data['created_at'] = datetime.fromisoformat(data['created_at'])
+                room = Room(**data)
+                if state:
+                    gs = object.__new__(GameState)
+                    gs.__dict__.update(state)
+                    gs.players = [PlayerState(**p) for p in state['players']]
+                    gs._pending_claims = set(gs._pending_claims)
+                    gs._skipped_claims = set(gs._skipped_claims)
+                    room.game_state = gs
+                self._rooms[room.id] = room
+
+    def save_room(self, room, changed=True):
+        # ponytail: one event-loop process; shared storage needs a transactional owner before adding replicas.
+        if room.status == 'storage_error':
+            raise OSError('mahjong.storage_unavailable')
+        if self.data_dir:
+            from api.access import atomic_json
+            data = {k: v for k, v in vars(room).items() if k != 'game_state'}
+            data['revision'] = room.revision + int(changed)
+            data['game_state'] = None
+            if room.game_state:
+                data['game_state'] = {**vars(room.game_state),
+                                      'players': [asdict(p) for p in room.game_state.players]}
+            try:
+                atomic_json(self.data_dir / f'{room.id}.json', data)
+            except OSError:
+                # Do not serve uncommitted private state or continue accepting moves after disk failure.
+                room.status = 'storage_error'
+                if room.id in self._rooms:
+                    self._rooms[room.id].status = 'storage_error'
+                raise
+        room.revision += int(changed)
 
     # ------------------------------------------------------------------
     # Room lifecycle

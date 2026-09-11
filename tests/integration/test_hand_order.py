@@ -27,7 +27,7 @@ from api.routes import room_manager
 
 def _create_and_start(client, player_id="hand_order_player"):
     room_id = client.post("/api/rooms").json()["id"]
-    client.post(f"/api/rooms/{room_id}/join", json={"player_id": player_id})
+    client.post(f"/api/rooms/{room_id}/join", json={})
     client.post(f"/api/rooms/{room_id}/start")
     return room_id
 
@@ -73,7 +73,7 @@ class TestHandOrderFromServer:
         returns it in exactly that order, i.e. *the server does not sort*.
         The client is responsible for sorting before display.
         """
-        pid = "order_check"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
 
         # Set a reverse-order hand (9 down to 1)
@@ -85,7 +85,7 @@ class TestHandOrderFromServer:
         ]
         _set_hand(room_id, 0, reverse_hand)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             state_msg = _drain_until(ws, "game_state")
 
         tiles = _get_hand_tiles_from_state(state_msg["state"], 0)
@@ -97,7 +97,7 @@ class TestHandOrderFromServer:
 
     def test_server_returns_mixed_suit_hand_unsorted(self, client):
         """A hand with mixed suits arrives in the server's storage order."""
-        pid = "mixed_order"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
 
         mixed_hand = [
@@ -108,7 +108,7 @@ class TestHandOrderFromServer:
         ]
         _set_hand(room_id, 0, mixed_hand)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             state_msg = _drain_until(ws, "game_state")
 
         tiles = _get_hand_tiles_from_state(state_msg["state"], 0)
@@ -117,7 +117,7 @@ class TestHandOrderFromServer:
     def test_pung_appends_tile_to_arbitrary_position(self, client):
         """After pung, the discard tile is appended then the meld removed;
         remaining tiles are NOT sorted by the server."""
-        pid = "pung_order"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
 
         gs = room_manager.get_room(room_id).game_state
@@ -134,11 +134,11 @@ class TestHandOrderFromServer:
         gs._skipped_claims = {2, 3}
         gs._best_claim = None
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
 
-            ws.send_json({"type": "pung"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "pung"})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]

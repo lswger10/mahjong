@@ -29,7 +29,7 @@ from api.routes import room_manager
 def _create_and_start(client, player_id="claim_player"):
     """Create a room, join as player_id, start via REST; return room_id."""
     room_id = client.post("/api/rooms").json()["id"]
-    client.post(f"/api/rooms/{room_id}/join", json={"player_id": player_id})
+    client.post(f"/api/rooms/{room_id}/join", json={})
     client.post(f"/api/rooms/{room_id}/start")
     return room_id
 
@@ -86,7 +86,7 @@ def _drain_until(ws, target_type, max_msgs=8):
 class TestClaimPung:
     def test_pung_offered_in_claim_window(self, client):
         """claim_window includes 'pung' when player holds two matching tiles."""
-        pid = "pung_offer"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -95,7 +95,7 @@ class TestClaimPung:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
 
@@ -105,7 +105,7 @@ class TestClaimPung:
 
     def test_pung_forms_meld_and_enters_discard(self, client):
         """Successful pung: meld appears, phase becomes discarding."""
-        pid = "pung_claim"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -114,11 +114,11 @@ class TestClaimPung:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
 
-            ws.send_json({"type": "pung"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "pung"})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -130,7 +130,7 @@ class TestClaimPung:
 
     def test_pung_removes_tiles_from_hand(self, client):
         """After pung the two paired tiles leave the hand."""
-        pid = "pung_hand"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -139,10 +139,10 @@ class TestClaimPung:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "pung"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "pung"})
             state_msg = _drain_until(ws, "game_state")
 
         hand = state_msg["state"]["players"][0]["hand"]
@@ -161,7 +161,7 @@ class TestClaimPung:
 class TestClaimChow:
     def test_chow_offered_from_left_player(self, client):
         """claim_window includes 'chow' when discarder is to player 0's left."""
-        pid = "chow_offer"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         # Chow requires last_discard_player == (0 - 1) % 4 == 3
         _setup_claiming(
@@ -171,7 +171,7 @@ class TestClaimChow:
             discarder_idx=3,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
 
@@ -180,7 +180,7 @@ class TestClaimChow:
 
     def test_chow_not_offered_from_non_left_player(self, client):
         """'chow' is absent when the discarder is not to player 0's immediate left."""
-        pid = "chow_wrong"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         # Discarder=1: (0-1)%4 == 3 ≠ 1 → chow not available
         _setup_claiming(
@@ -190,7 +190,7 @@ class TestClaimChow:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
 
@@ -198,7 +198,7 @@ class TestClaimChow:
 
     def test_chow_forms_meld_and_enters_discard(self, client):
         """Successful chow: sequence meld formed, phase becomes discarding."""
-        pid = "chow_claim"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -207,11 +207,11 @@ class TestClaimChow:
             discarder_idx=3,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
 
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -223,7 +223,7 @@ class TestClaimChow:
 
     def test_chow_removes_hand_tiles(self, client):
         """After chow, the two hand tiles used are gone from the hand."""
-        pid = "chow_hand"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -232,10 +232,10 @@ class TestClaimChow:
             discarder_idx=3,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
             state_msg = _drain_until(ws, "game_state")
 
         hand_tiles = state_msg["state"]["players"][0]["hand"]["tiles"]
@@ -271,10 +271,10 @@ class TestClaimChowMultipleOptions:
 
     def test_chow_action_offered_with_multiple_options(self, client):
         """'chow' appears in claim_window when player has multiple valid sequences."""
-        pid = "multi_chow_offer"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
 
@@ -283,13 +283,13 @@ class TestClaimChowMultipleOptions:
 
     def test_chow_option_a_san_si_wu(self, client):
         """Player picks 三四五 (hand tiles 3-4); correct meld formed."""
-        pid = "multi_chow_a"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -307,13 +307,13 @@ class TestClaimChowMultipleOptions:
 
     def test_chow_option_b_si_wu_liu(self, client):
         """Player picks 四五六 (hand tiles 4-6); correct meld formed."""
-        pid = "multi_chow_b"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_4", "BAMBOO_6"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_4", "BAMBOO_6"]})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -330,13 +330,13 @@ class TestClaimChowMultipleOptions:
 
     def test_chow_option_c_wu_liu_qi(self, client):
         """Player picks 五六七 (hand tiles 6-7); correct meld formed."""
-        pid = "multi_chow_c"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_6", "BAMBOO_7"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_6", "BAMBOO_7"]})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -353,29 +353,29 @@ class TestClaimChowMultipleOptions:
 
     def test_chow_invalid_tiles_rejected(self, client):
         """Sending tiles that don't form a valid chow returns an error."""
-        pid = "multi_chow_invalid"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
             # BAMBOO_1 and BAMBOO_2 are not in the player's hand
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_1", "BAMBOO_2"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_1", "BAMBOO_2"]})
             err = _drain_until(ws, "error")
 
         assert err["type"] == "error"
 
     def test_chow_tiles_not_in_hand_rejected(self, client):
         """Sending a syntactically valid sequence whose tiles aren't in hand is rejected."""
-        pid = "multi_chow_not_in_hand"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
             # BAMBOO_3 and BAMBOO_4 form a valid chow with BAMBOO_5,
             # but let's try a combo using BAMBOO_2 which isn't in hand
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_2", "BAMBOO_3"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_2", "BAMBOO_3"]})
             err = _drain_until(ws, "error")
 
         assert err["type"] == "error"
@@ -389,7 +389,7 @@ class TestClaimChowMultipleOptions:
 class TestClaimKong:
     def test_kong_offered_when_holding_three(self, client):
         """claim_window includes 'kong' when player holds three matching tiles."""
-        pid = "kong_offer"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -398,7 +398,7 @@ class TestClaimKong:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
 
@@ -407,7 +407,7 @@ class TestClaimKong:
 
     def test_kong_forms_quad_meld(self, client):
         """Claimed kong: four-tile meld appears and player enters discarding."""
-        pid = "kong_claim"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -416,12 +416,12 @@ class TestClaimKong:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
 
             # Claimed kong: no tile field → server uses last_discard
-            ws.send_json({"type": "kong"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong"})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -435,17 +435,17 @@ class TestClaimKong:
 
     def test_kong_player_draws_replacement_tile(self, client):
         """After a claimed kong the player receives a replacement tile."""
-        pid = "kong_replacement"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         initial_hand = ["CIRCLES_5", "CIRCLES_5", "CIRCLES_5", "BAMBOO_2"]
         _setup_claiming(
             room_id, initial_hand, discard_tile="CIRCLES_5", discarder_idx=1
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "kong"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong"})
             state_msg = _drain_until(ws, "game_state")
 
         hand_tiles = state_msg["state"]["players"][0]["hand"]["tiles"]
@@ -463,7 +463,7 @@ class TestClaimKong:
 class TestClaimSkip:
     def test_skip_advances_to_next_draw(self, client):
         """Skipping when pung is available advances turn without creating a meld."""
-        pid = "skip_claim"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -472,12 +472,12 @@ class TestClaimSkip:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
             assert "pung" in cw["actions"]  # could pung, but will skip
 
-            ws.send_json({"type": "skip"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "skip"})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -486,7 +486,7 @@ class TestClaimSkip:
 
     def test_skip_only_when_no_claim_possible(self, client):
         """When player holds unrelated tiles, claim_window offers only 'skip'."""
-        pid = "skip_only"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -495,7 +495,7 @@ class TestClaimSkip:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
 
@@ -513,7 +513,7 @@ class TestClaimSkip:
 class TestClaimWin:
     def test_win_in_claiming_phase_ends_game(self, client):
         """Declaring win on a completing discard ends the game."""
-        pid = "win_claim"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         # 13-tile near-complete hand; EAST completes it as the pair
         near_complete = [
@@ -527,12 +527,12 @@ class TestClaimWin:
             room_id, near_complete, discard_tile="EAST", discarder_idx=1
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
             assert "win" in cw["actions"]
 
-            ws.send_json({"type": "win"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "win"})
 
             state_msg = _drain_until(ws, "game_state")
             game_over_msg = _drain_until(ws, "game_over")
@@ -544,7 +544,7 @@ class TestClaimWin:
 
     def test_win_not_offered_for_non_winning_hand(self, client):
         """'win' is absent from claim_window when hand + discard is not complete."""
-        pid = "win_no_offer"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -553,7 +553,7 @@ class TestClaimWin:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
 
@@ -561,7 +561,7 @@ class TestClaimWin:
 
     def test_invalid_win_returns_error(self, client):
         """Manually sending win when hand is invalid returns an error message."""
-        pid = "bad_win"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         # Force player into pending_claims with a non-winning hand
         _setup_claiming(
@@ -571,14 +571,14 @@ class TestClaimWin:
             discarder_idx=1,
         )
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
 
-            ws.send_json({"type": "win"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "win"})
             err = _drain_until(ws, "error")
 
-        assert "winning" in err["message"].lower() or "not" in err["message"].lower()
+        assert err["message_key"] == "mahjong.action_unavailable"
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +598,7 @@ class TestClaimChowEdgeTiles:
 
     def test_chow_low_edge_one_combo_offered(self, client):
         """Discard BAMBOO_1: claim_window offers 'chow'; only 1-2-3 is valid."""
-        pid = "edge_low_offer"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -606,14 +606,14 @@ class TestClaimChowEdgeTiles:
             discard_tile="BAMBOO_1",
             discarder_idx=3,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
         assert "chow" in cw["actions"]
 
     def test_chow_low_edge_forms_correct_meld(self, client):
         """Successful 1-2-3 chow at low edge; only those tiles leave hand."""
-        pid = "edge_low_meld"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -621,10 +621,10 @@ class TestClaimChowEdgeTiles:
             discard_tile="BAMBOO_1",
             discarder_idx=3,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_2", "BAMBOO_3"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_2", "BAMBOO_3"]})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -638,7 +638,7 @@ class TestClaimChowEdgeTiles:
 
     def test_chow_high_edge_forms_correct_meld(self, client):
         """Successful 7-8-9 chow at high edge."""
-        pid = "edge_high_meld"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -646,10 +646,10 @@ class TestClaimChowEdgeTiles:
             discard_tile="BAMBOO_9",
             discarder_idx=3,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_7", "BAMBOO_8"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_7", "BAMBOO_8"]})
             state_msg = _drain_until(ws, "game_state")
 
         meld = state_msg["state"]["players"][0]["melds"][0]
@@ -657,7 +657,7 @@ class TestClaimChowEdgeTiles:
 
     def test_chow_kanchan_gap_forms_correct_meld(self, client):
         """坎张: discard=5, hand=[4,6] → only 4-5-6 valid."""
-        pid = "kanchan_meld"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -665,10 +665,10 @@ class TestClaimChowEdgeTiles:
             discard_tile="BAMBOO_5",
             discarder_idx=3,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_4", "BAMBOO_6"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_4", "BAMBOO_6"]})
             state_msg = _drain_until(ws, "game_state")
 
         meld = state_msg["state"]["players"][0]["melds"][0]
@@ -676,7 +676,7 @@ class TestClaimChowEdgeTiles:
 
     def test_chow_kanchan_wrong_tiles_rejected(self, client):
         """坎张: sending [3,4] when hand only has [4,6] is rejected."""
-        pid = "kanchan_bad"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -684,16 +684,16 @@ class TestClaimChowEdgeTiles:
             discard_tile="BAMBOO_5",
             discarder_idx=3,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
             err = _drain_until(ws, "error")
         assert err["type"] == "error"
 
     def test_chow_tile_2_two_combos_first_works(self, client):
         """Discard BAMBOO_2, hand [1,3,3,4]: pick 1-2-3 combo."""
-        pid = "two_combo_first"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -701,10 +701,10 @@ class TestClaimChowEdgeTiles:
             discard_tile="BAMBOO_2",
             discarder_idx=3,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_1", "BAMBOO_3"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_1", "BAMBOO_3"]})
             state_msg = _drain_until(ws, "game_state")
 
         meld = state_msg["state"]["players"][0]["melds"][0]
@@ -712,7 +712,7 @@ class TestClaimChowEdgeTiles:
 
     def test_chow_tile_2_two_combos_second_works(self, client):
         """Discard BAMBOO_2, hand [1,3,3,4]: pick 2-3-4 combo."""
-        pid = "two_combo_second"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -720,10 +720,10 @@ class TestClaimChowEdgeTiles:
             discard_tile="BAMBOO_2",
             discarder_idx=3,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
             state_msg = _drain_until(ws, "game_state")
 
         meld = state_msg["state"]["players"][0]["melds"][0]
@@ -731,16 +731,16 @@ class TestClaimChowEdgeTiles:
 
     def test_chow_hand_tile_count_after_claim(self, client):
         """Hand tile count is exactly 2 fewer after a chow (2 tiles consumed)."""
-        pid = "chow_count"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         initial_hand = ["BAMBOO_3", "BAMBOO_4", "CIRCLES_1", "EAST", "SOUTH"]
         _setup_claiming(
             room_id, initial_hand, discard_tile="BAMBOO_5", discarder_idx=3
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "chow", "tiles": ["BAMBOO_3", "BAMBOO_4"]})
             state_msg = _drain_until(ws, "game_state")
 
         hand = state_msg["state"]["players"][0]["hand"]["tiles"]
@@ -803,7 +803,7 @@ class TestPungThenExtendPung:
         pid  = "epung_offer"
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             ar = _drain_until(ws, "action_required")
 
@@ -815,11 +815,11 @@ class TestPungThenExtendPung:
         pid  = "epung_meld"
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
 
-            ws.send_json({"type": "kong", "tile": self.PUNG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.PUNG_TILE})
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -832,10 +832,10 @@ class TestPungThenExtendPung:
         pid  = "epung_hand"
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.PUNG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.PUNG_TILE})
             state_msg = _drain_until(ws, "game_state")
 
         hand = state_msg["state"]["players"][0]["hand"]["tiles"]
@@ -849,10 +849,10 @@ class TestPungThenExtendPung:
         pid  = "epung_phase"
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.PUNG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.PUNG_TILE})
             state_msg = _drain_until(ws, "game_state")
 
         # Extend-pung triggers a 搶杠 window; other players may try to win
@@ -869,11 +869,11 @@ class TestPungThenExtendPung:
         pid  = "epung_badtile"
         room_id = self._setup(client, pid)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
             # CIRCLES_1 is in hand but has no matching pung meld
-            ws.send_json({"type": "kong", "tile": "CIRCLES_1"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": "CIRCLES_1"})
             err = _drain_until(ws, "error")
 
         assert err["type"] == "error"
@@ -920,9 +920,9 @@ class TestConcealedKongIntegration:
 
     def test_concealed_kong_action_offered(self, client):
         """action_required includes 'kong' when player holds 4 identical tiles."""
-        pid = "ck_offer"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             ar = _drain_until(ws, "action_required")
         assert "kong" in ar["actions"]
@@ -930,12 +930,12 @@ class TestConcealedKongIntegration:
 
     def test_concealed_kong_creates_quad_meld(self, client):
         """Sending kong forms a 4-tile meld and player stays in discarding."""
-        pid = "ck_meld"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.KONG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.KONG_TILE})
             state_msg = _drain_until(ws, "game_state")
         state = state_msg["state"]
         assert state["phase"] == "discarding"
@@ -945,29 +945,29 @@ class TestConcealedKongIntegration:
 
     def test_concealed_kong_then_action_required_to_discard(self, client):
         """After concealed kong, player gets action_required with 'discard'."""
-        pid = "ck_ar"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.KONG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.KONG_TILE})
             _drain_until(ws, "game_state")
             ar2 = _drain_until(ws, "action_required")
         assert "discard" in ar2["actions"]
 
     def test_concealed_kong_tile_not_in_hand_returns_error(self, client):
         """Sending a tile with fewer than 4 copies is rejected."""
-        pid = "ck_err"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_concealed_kong(
             room_id,
             ["BAMBOO_3"] * 2 + ["CIRCLES_1", "EAST", "SOUTH"],
             "BAMBOO_3",
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": "BAMBOO_3"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": "BAMBOO_3"})
             err = _drain_until(ws, "error")
         assert err["type"] == "error"
 
@@ -975,17 +975,17 @@ class TestConcealedKongIntegration:
         """action_required after kong must include 'drawn_tile' pointing to the
         replacement tile (not a flower), so the frontend can auto-select it."""
         from game.tiles import is_flower_tile
-        pid = "ck_drawn"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
 
         room = room_manager.get_room(room_id)
         # Force a known non-flower replacement
         room.game_state.wall = ["CIRCLES_9"] * 20
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.KONG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.KONG_TILE})
             _drain_until(ws, "game_state")
             ar2 = _drain_until(ws, "action_required")
 
@@ -1007,21 +1007,21 @@ class TestExtendPungKongIntegration:
 
     def test_extend_pung_offered_in_discarding(self, client):
         """'kong' appears in action_required during own discarding turn."""
-        pid = "ep_offered"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             ar = _drain_until(ws, "action_required")
         assert "kong" in ar["actions"]
 
     def test_extend_pung_opens_rob_kong_claiming_phase(self, client):
         """After extend-pung, game_state shows phase='claiming' (搶杠 window)."""
-        pid = "ep_claiming"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.PUNG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.PUNG_TILE})
             state_msg = _drain_until(ws, "game_state")
         assert state_msg["state"]["phase"] == "claiming"
         melds = state_msg["state"]["players"][0]["melds"]
@@ -1032,17 +1032,17 @@ class TestExtendPungKongIntegration:
         discarding for the konger (critical state-machine correctness test).
         Note: action_required is sent via a background task that doesn't run
         in synchronous TestClient; we verify the game_state instead."""
-        pid = "ep_gs_disc"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_extend_pung_for_int(room_id, self.PUNG_TILE, self.OTHER)
 
         room = room_manager.get_room(room_id)
         gs = room.game_state
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.PUNG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.PUNG_TILE})
             rob_kong_state = _drain_until(ws, "game_state")
 
         # Verify rob-kong window was opened correctly
@@ -1067,15 +1067,15 @@ class TestExtendPungKongIntegration:
 
     def test_extend_pung_chip_payment_after_completion(self, client):
         """Kong chip transfers are recorded when 搶杠 window closes without a rob."""
-        pid = "ep_chips"
+        pid = client.guest_id
         room_id = self._setup(client, pid)
         room = room_manager.get_room(room_id)
         gs = room.game_state
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": self.PUNG_TILE})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": self.PUNG_TILE})
             _drain_until(ws, "game_state")
 
         # Simulate all AI skipping and verify chip payment recorded
@@ -1095,7 +1095,7 @@ class TestKongEdgeCases:
 
     def test_claimed_kong_not_from_non_left_player_in_discarding(self, client):
         """Claimed kong from a discard is only in claim_window, not discarding."""
-        pid = "ck_not_disc"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         # Set up normal claiming state (player 1 discarded, player 0 has 3 matching)
         _setup_claiming(
@@ -1104,12 +1104,12 @@ class TestKongEdgeCases:
             discard_tile="EAST",
             discarder_idx=1,
         )
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
             assert "kong" in cw["actions"]
 
-            ws.send_json({"type": "kong"})  # no tile field → uses last_discard
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong"})  # no tile field → uses last_discard
             state_msg = _drain_until(ws, "game_state")
 
         state = state_msg["state"]
@@ -1120,7 +1120,7 @@ class TestKongEdgeCases:
 
     def test_cannot_kong_discarder_own_tile(self, client):
         """The discarder cannot kong their own discarded tile."""
-        pid = "ck_self"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
         _setup_claiming(
             room_id,
@@ -1132,7 +1132,7 @@ class TestKongEdgeCases:
         room = room_manager.get_room(room_id)
         room.game_state._pending_claims.discard(0)
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             # No claim window should be sent to the discarder
             # (auto-skipped or not in pending claims)
@@ -1143,7 +1143,7 @@ class TestKongEdgeCases:
         """When kong replacement is a flower, action_required drawn_tile must be
         the subsequent non-flower tile (not the flower itself)."""
         from game.tiles import is_flower_tile
-        pid = "ck_flower"
+        pid = client.guest_id
         room_id = _create_and_start(client, pid)
 
         room = room_manager.get_room(room_id)
@@ -1156,10 +1156,10 @@ class TestKongEdgeCases:
         # Wall: FLOWER_1 is drawn first, then BAMBOO_9 as the real replacement
         gs.wall = ["BAMBOO_9", "FLOWER_1"]
 
-        with client.websocket_connect(f"/ws/{room_id}/{pid}") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "action_required")
-            ws.send_json({"type": "kong", "tile": "BAMBOO_3"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "kong", "tile": "BAMBOO_3"})
             _drain_until(ws, "game_state")
             ar = _drain_until(ws, "action_required")
 
@@ -1194,8 +1194,11 @@ class TestHumanWinForcesClaimWindowClose:
         Both seat 0 and seat 1 remain in _pending_claims (no pre-skip for 1).
         """
         room_id = client.post("/api/rooms").json()["id"]
-        client.post(f"/api/rooms/{room_id}/join", json={"player_id": "winner"})
-        client.post(f"/api/rooms/{room_id}/join", json={"player_id": "punger"})
+        from fastapi.testclient import TestClient
+        from main import app
+        second = TestClient(app)
+        second.post('/api/guest', json={})
+        second.post(f'/api/rooms/{room_id}/join', json={})
         client.post(f"/api/rooms/{room_id}/start")
 
         room = room_manager.get_room(room_id)
@@ -1240,18 +1243,18 @@ class TestHumanWinForcesClaimWindowClose:
         """
         room_id, room, gs = self._setup_two_human_claim(client)
 
-        with client.websocket_connect(f"/ws/{room_id}/winner") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             cw = _drain_until(ws, "claim_window")
             assert "win" in cw["actions"], "winner should see win option"
 
-            ws.send_json({"type": "win"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "win"})
 
             # Game must end immediately — no 30-second wait.
             # game_over arrives after _broadcast_game_state + _handle_game_over.
             game_over = _drain_until(ws, "game_over", max_msgs=12)
 
-        assert game_over["winner_id"] == "winner"
+        assert game_over["winner_id"] == client.guest_id
         assert gs.phase == "ended"
         assert room.status == "ended"
 
@@ -1264,14 +1267,14 @@ class TestHumanWinForcesClaimWindowClose:
         """
         room_id, room, gs = self._setup_two_human_claim(client)
 
-        with client.websocket_connect(f"/ws/{room_id}/winner") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "win"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "win"})
             _drain_until(ws, "game_over", max_msgs=12)
 
         # Seat 1 (punger) should NOT have formed a pung meld — winner takes priority.
-        assert gs.winner == "winner", "winner should be the declared winner"
+        assert gs.winner == client.guest_id, "winner should be the declared winner"
         pung_melds = [m for m in gs.players[1].melds if len(m) == 3 and m[0] == m[1]]
         assert not pung_melds, (
             f"punger must not have formed a meld (win overrides pung); got {gs.players[1].melds}"
@@ -1298,10 +1301,10 @@ class TestHumanWinForcesClaimWindowClose:
         # Snapshot all chip balances before the game ends
         before = {p.id: room.cumulative_scores.get(p.id, INITIAL_CHIPS) for p in gs.players}
 
-        with client.websocket_connect(f"/ws/{room_id}/winner") as ws:
+        with client.websocket_connect(f"/ws/{room_id}") as ws:
             _drain_until(ws, "game_state")
             _drain_until(ws, "claim_window")
-            ws.send_json({"type": "win"})
+            ws.send_json({"revision": room_manager.get_room(room_id).revision, "type": "win"})
             _drain_until(ws, "game_over", max_msgs=12)
 
         after = {p.id: room.cumulative_scores.get(p.id, INITIAL_CHIPS) for p in gs.players}
@@ -1310,11 +1313,11 @@ class TestHumanWinForcesClaimWindowClose:
         assert sum(before.values()) == sum(after.values()), "chip total must be conserved"
 
         # Winner gained chips.
-        assert after["winner"] > before["winner"], "winner should gain chips"
+        assert after[client.guest_id] > before[client.guest_id], "winner should gain chips"
 
         # Double-settlement would give the winner 2× the correct payout.
         # Maximum single ron payout: 64 × 3 = 192 chips (7+ fan, dealer win).
-        delta = after["winner"] - before["winner"]
+        delta = after[client.guest_id] - before[client.guest_id]
         assert delta <= 192, (
             f"winner gained {delta} chips — likely double settlement (max valid = 192)"
         )
@@ -1326,6 +1329,6 @@ class TestHumanWinForcesClaimWindowClose:
         )
 
         # Punger (human seat 1) is NOT the discarder — they pay nothing in Ron.
-        assert after["punger"] == before["punger"], (
+        assert after[gs.players[1].id] == before[gs.players[1].id], (
             "non-discarder punger should not lose any chips in Ron"
         )

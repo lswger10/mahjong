@@ -1,102 +1,98 @@
-"""
-routes.py - REST API endpoints for the Mahjong game.
-
-Endpoints:
-  GET  /api/rooms                  - List all rooms
-  POST /api/rooms                  - Create a new room
-  POST /api/rooms/{room_id}/join   - Join an existing room
-  POST /api/rooms/{room_id}/start  - Start the game (deals tiles, fills AI seats)
-"""
-
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-
+"""Private room routes: every player identity is derived from an HttpOnly guest session."""
+from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
 from game.room_manager import RoomManager
+from api.access import COOKIE, DATA_DIR, SESSION_SECONDS, guests, principal, check_origin, member, join, view
 
 router = APIRouter()
+room_manager = RoomManager(DATA_DIR / 'rooms')
 
-# ---------------------------------------------------------------------------
-# Shared singleton – imported by websocket.py as well
-# ---------------------------------------------------------------------------
-room_manager = RoomManager()
+class GuestBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    nickname: str | None = Field(default=None, min_length=1, max_length=32)
 
+class RoomBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    ai_fill: bool = True
 
-# ---------------------------------------------------------------------------
-# Request / response models
-# ---------------------------------------------------------------------------
+class JoinBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
 
-class CreateRoomRequest(BaseModel):
-    name: Optional[str] = None
+@router.post('/guest')
+async def guest_session(request: Request, response: Response, body: GuestBody = GuestBody()):
+    check_origin(request)
+    token, record = guests.issue(request.cookies.get(COOKIE), body.nickname)
+    response.set_cookie(COOKIE, token, httponly=True, secure=request.url.scheme == 'https',
+                        samesite='strict', max_age=SESSION_SECONDS, path='/')
+    response.headers['Cache-Control'] = 'no-store'
+    return {'id': record['id'], 'nickname': record['nickname']}
 
+@router.get('/rooms')
+async def list_rooms(request: Request):
+    who = principal(request)
+    return [r.to_dict() for r in room_manager.get_rooms()
+            if who['id'] in r.members and not r.members[who['id']]['left']]
 
-class JoinRoomRequest(BaseModel):
-    player_id: str
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-@router.get("/rooms")
-def list_rooms():
-    """Return a list of all rooms with summary information."""
-    rooms = room_manager.get_rooms()
-    return [r.to_dict() for r in rooms]
-
-
-@router.post("/rooms", status_code=201)
-def create_room(body: CreateRoomRequest = CreateRoomRequest()):
-    """Create a new room and return its info."""
-    room = room_manager.create_room(name=body.name)
+@router.post('/rooms', status_code=201)
+async def create_room(request: Request, body: RoomBody = RoomBody()):
+    who = principal(request)
+    room = room_manager.create_room(body.name)
+    room.owner_id, room.ai_fill = who['id'], body.ai_fill
+    join(room_manager, room.id, who['id'], who['nickname'])
     return room.to_dict()
 
+@router.post('/rooms/{room_id}/join')
+async def join_room(room_id: str, request: Request, body: JoinBody = JoinBody()):
+    who = principal(request)
+    room = join(room_manager, room_id, who['id'], who['nickname'])
+    from api.websocket import _broadcast_room_update
+    await _broadcast_room_update(room_id)
+    return {'room_id': room.id, 'player_idx': room.human_players.index(who['id']),
+            'was_redirected': False, 'room': room.to_dict()}
 
-@router.post("/rooms/{room_id}/join")
-def join_room(room_id: str, body: JoinRoomRequest):
-    """
-    Join an existing room.
+@router.get('/rooms/{room_id}')
+async def read_room(room_id: str, request: Request):
+    who = principal(request)
+    if request.query_params:
+        raise HTTPException(400, 'mahjong.identity_parameters_forbidden')
+    return view(room_manager, room_id, who['id'])
 
-    If the room is full the player is automatically redirected to a new room.
-    Returns the room the player actually joined.
-    """
-    try:
-        room, was_redirected = room_manager.join_room(room_id, body.player_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+@router.post('/rooms/{room_id}/action')
+async def action(room_id: str, request: Request):
+    who = principal(request)
+    member(room_manager, room_id, who['id'])
+    from api.websocket import submit
+    return await submit(room_id, who['id'], await request.json())
 
-    # Determine the player's seat index
-    player_idx = room.human_players.index(body.player_id)
+@router.post('/rooms/{room_id}/start')
+async def start(room_id: str, request: Request):
+    who = principal(request)
+    room = member(room_manager, room_id, who['id'], owner=True)
+    from api.websocket import submit
+    result = await submit(room_id, who['id'], {'type': 'start_game', 'revision': room.revision})
+    return {**result, 'status': room.status, 'players': result['state']['players']}
 
-    return {
-        "room_id": room.id,
-        "player_idx": player_idx,
-        "was_redirected": was_redirected,
-        "room": room.to_dict(),
-    }
+@router.post('/rooms/{room_id}/leave')
+async def leave(room_id: str, request: Request):
+    who = principal(request)
+    room = member(room_manager, room_id, who['id'])
+    room.members[who['id']]['left'] = True
+    room_manager.save_room(room)
+    from api.websocket import _connections, _broadcast_room_update
+    ws = _connections.get(room_id, {}).get(who['id'])
+    if ws:
+        await ws.close(code=4403)
+    await _broadcast_room_update(room_id)
+    return {'ok': True}
 
-
-@router.post("/rooms/{room_id}/start")
-def start_game(room_id: str):
-    """
-    Start the game for the given room.
-
-    Empty seats are filled with AI players and initial tiles are dealt.
-    """
-    room = room_manager.get_room(room_id)
-    if room is None:
-        raise HTTPException(status_code=404, detail=f"Room '{room_id}' not found.")
-
-    try:
-        game_state = room_manager.start_game(room_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    return {
-        "room_id": room_id,
-        "status": room.status,
-        "players": [
-            {"index": i, "id": p.id, "is_ai": p.is_ai}
-            for i, p in enumerate(game_state.players)
-        ],
-    }
+@router.post('/rooms/{room_id}/end')
+async def end(room_id: str, request: Request):
+    who = principal(request)
+    room = member(room_manager, room_id, who['id'], owner=True)
+    room.status = 'closed'
+    room_manager.save_room(room)
+    from api.websocket import stop_room, _broadcast_room_update
+    stop_room(room_id)
+    await _broadcast_room_update(room_id)
+    return {'ok': True}

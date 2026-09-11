@@ -35,3 +35,10 @@ vitest.config.js
 # 本地调试文件
 *.png
 MJTiles_Fullset.png
+
+# Credentials, local environments and persisted hands never enter build context.
+.env
+.env.*
+.venv/
+venv/
+data/

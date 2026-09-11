@@ -1,3 +1,67 @@
+# 小家麻将 · 独立子应用
+
+本分支基于 **zorrofox/mahjong@bd3842b**，保留原规则、Local AI、牌桌和素材。
+新增服务端 Guest 身份、邀请房间、稳定私有席位、分房持久化与官端椒椒 MCP。
+当前工程状态和验收界限请先读 [CURRENT_STATE.md](CURRENT_STATE.md)、
+[TEST_MATRIX.md](TEST_MATRIX.md)、[DECISIONS.md](DECISIONS.md)、[PITFALLS.md](PITFALLS.md)。
+
+## 启动本分支
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r backend/requirements.txt
+$env:MAHJONG_DATA_DIR = 'D:/Workspace/mahjong-data'
+# 官端接口可选；不需要时不设置。只监听本机回环地址。
+$env:MAHJONG_MCP_PORT = '8898'
+.\.venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8080
+```
+
+打开 `http://127.0.0.1:8080/`。输入昵称创建房间，把房间菜单内的邀请链接发给朋友。
+每个浏览器自己的 Cookie 对应自己的座位，不给朋友小家登录密钥。邀请成员应在开局前加入。
+勾选 Local AI 时只补未占用的席位；未勾选时等待四位成员。原位恢复和另一个人接管不同，
+本阶段不开放中途替换玩家。个人退出不结束整个房间，但轮到已退出席位时会等待其归来。
+
+## 官端椒椒
+
+同一个 Python 进程额外在 `127.0.0.1:8898/mcp` 提供五个工具。
+必须通过**同容器 OpenAI Secure MCP Tunnel** 转发，不得挂到公开 Web 端口、nginx 或另一台机器。
+独立创建 Mahjong 隧道，不更换正在使用的斗地主隧道目标，不复用其席位或 lease。
+使用现有隧道客户端时，运行凭据只进安全配置；这里不需要模型 API Key。
+平台身份取自 `openai/subject`、`openai/session`、`openai/organization`，工具参数不接受自报身份。
+
+向已连接麻将工具的官端椒椒发送：
+
+> 请加入麻将房间 `<房间码>`。在当前回复仍然活跃时持续 read → act → wait，轮到别人时继续等。
+
+工具名称：`join_table`（room_code、instance_id），`read_turn`、`wait_for_event`、`submit_action`、
+`leave_table`。后四者都携带 room_id 和私密 lease_id；提交必须使用 read 返回的 revision 和 legal_actions。
+动作成功后回执明确继续 wait，超时或平台停止当前 response 不自动 leave。没有人为总时长，
+也不承诺已经结束的 response 会被重新唤醒。此轮本地 MCP 验证不等同普通 ChatGPT 真实验收。
+
+## TEST 部署准备
+
+- 独立服务：预定 `next-mahjong`，HTTP 8080，独立持久卷 `/data`，`MAHJONG_DATA_DIR=/data/mahjong`。
+- 一个 worker、一个副本。MCP 若启用，同进程 loopback 端口 8898；隧道运行凭据不得进 Git/镜像。
+- 小家 Web 只代理 `/mahjong/` 到该服务（去掉前缀），同时传递原 Host、X-Forwarded-Proto 和 WS Upgrade。
+- 由受信任的反向代理接入时配置 Uvicorn `FORWARDED_ALLOW_IPS` 为实际代理来源；不要无条件信任公网转发头。
+- **先部署并确认麻将服务 DNS/healthz/持久卷，再发布引用它的 Tidal Web。** 当前未部署，不能直接把 Web 提交推送触发自动发布。
+- 公网游戏入口允许创建独立 Guest；所有房间私有状态继续由麻将自身鉴权，不借用 Relay 登录。
+- 本机 `Dockerfile` 仍启动 `backend.main:app`，可复用；容器构建、云端 TLS/nginx 和三星实机尚未验收。
+
+## 来源与授权
+
+源码来自 [zorrofox/mahjong](https://github.com/zorrofox/mahjong)。用户于 2026-09-11 明确确认已取得原作者
+授权，可以开源使用；这是用户提供的授权事实，上游 bd3842b 本身没有 LICENSE 文件。
+本分支保留原作者归属，不擅自给上游代码补写 MIT 等许可证，也不把新增接入代码的许可冒充原作者授权全文。
+
+牌面保留上游 [Wikimedia Commons / Cangjie6](https://commons.wikimedia.org/wiki/User:Cangjie6) 来源标识，
+遵循 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)。本轮没有改动牌面 SVG；其素材许可与代码授权分开。
+
+---
+
+以下是 **bd3842b 的上游 README 历史说明**。其中纯内存、player_id 身份、自动 AI 接管和旧测试数字，
+以本分支上方说明及 CURRENT_STATE 为准；牌规介绍仍可参考。
+
 # 麻将游戏 / Mahjong
 
 基于浏览器的多人麻将游戏，支持 1–4 名真人玩家，空位由 AI 自动填补。

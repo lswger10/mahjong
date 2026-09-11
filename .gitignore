@@ -11,3 +11,6 @@ build/
 .coverage
 node_modules/
 coverage/
+data/
+htmlcov/
+.pytest_cache/

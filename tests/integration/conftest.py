@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 from api.routes import room_manager
-from api.websocket import _connections, _claim_window_active, _ai_takeover_tasks
+from api.websocket import _connections, _claim_window_active
 
 
 @pytest.fixture(autouse=True)
@@ -19,16 +19,15 @@ def _clear_state():
     room_manager._rooms.clear()
     _connections.clear()
     _claim_window_active.clear()
-    _ai_takeover_tasks.clear()
     yield
     room_manager._rooms.clear()
     _connections.clear()
     _claim_window_active.clear()
-    _ai_takeover_tasks.clear()
 
 
 @pytest.fixture
 def client():
     """Provide a TestClient for the FastAPI app."""
     with TestClient(app) as c:
+        c.guest_id = c.post('/api/guest', json={'nickname': '人工测试'}).json()['id']
         yield c

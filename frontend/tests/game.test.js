@@ -607,7 +607,7 @@ describe('selectTile — scrollIntoView on mobile', () => {
 /* ==========================================================
    showGameOverModal — dealer restart authority (multiplayer)
    ========================================================== */
-describe('showGameOverModal — canRestart / dealer authority', () => {
+describe('showGameOverModal — canRestart / owner authority', () => {
   // Build minimal DOM mocks for modal elements
   function makeModalMocks() {
     const btnPlayAgain = {
@@ -635,7 +635,7 @@ describe('showGameOverModal — canRestart / dealer authority', () => {
     const { btnPlayAgain, restore } = makeModalMocks()
     showGameOverModal('winner', {}, {}, 1, [], 0, false)
     expect(btnPlayAgain.disabled).toBe(true)
-    expect(btnPlayAgain.textContent).toContain('等待庄家')
+    expect(btnPlayAgain.textContent).toContain('等待房主')
     expect(btnPlayAgain.title).toBeTruthy()
     restore()
   })

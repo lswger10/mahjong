@@ -1,4 +1,8 @@
 fastapi==0.111.0
-uvicorn[standard]==0.29.0
+uvicorn[standard]==0.31.1
 websockets==12.0
 python-multipart==0.0.9
+
+# Official Mahjong MCP; v1 API avoids migrating the existing FastAPI stack.
+mcp==1.30.0
+sse-starlette==2.1.3

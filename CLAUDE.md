@@ -1,3 +1,8 @@
+> 本分支维护入口：先读 [CURRENT_STATE](CURRENT_STATE.md)、[TEST_MATRIX](TEST_MATRIX.md)、
+> [DECISIONS](DECISIONS.md)、[PITFALLS](PITFALLS.md) 和 README 的“小家麻将”部分。
+> 下文保留上游历史说明；本分支已使用服务端 Guest/Seat、分房存档、独立 MCP，
+> 无鉴权、纯内存、自动 AI 接管不再是当前行为。
+
 # 麻将游戏 (Mahjong Game) — 项目文档
 
 > **语言约定**：请始终用中文回复用户。

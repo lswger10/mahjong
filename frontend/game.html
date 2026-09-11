@@ -409,7 +409,19 @@
   ==================================================== -->
   <div id="topbar">
     <h1>麻將遊戲</h1>
-    <div id="room-info">Connecting…</div>
+    <div id="room-info">麻将房间</div>
+    <details style="position:relative"><summary>房间 / 邀请</summary>
+      <div style="position:absolute;right:0;top:28px;width:min(360px,85vw);padding:16px;background:#173d30;z-index:100;border:1px solid #aaa;border-radius:12px;display:grid;gap:10px">
+        <label>房间码 <input id="room-code" readonly style="width:100%" /></label>
+        <label>朋友邀请链接 <input id="invite-link" readonly style="width:100%" /></label>
+        <button id="btn-copy-invite" class="btn">复制邀请链接</button>
+        <p id="room-seats"></p>
+        <p>官端椒椒：连接麻将工具后，把房间码发给椒椒，让她加入并持续陪玩。</p>
+        <a href="index.html">返回大厅（保留座位）</a>
+        <button id="btn-leave-room" class="btn">退出我的席位</button>
+        <button id="btn-end-room" class="btn" hidden>结束房间</button>
+      </div>
+    </details>
     <div class="conn-status">
       <span class="conn-indicator connecting" id="conn-dot"></span>
       <span id="conn-text">Connecting</span>
@@ -602,11 +614,11 @@
           const chips = (state.cumulative_scores || {})[player.id] ?? '–';
           const isDealer = state.dealer_idx === playerIdx;
           // Guard: skip innerHTML write when nothing changed.
-          const labelKey = `${player.id}|${chips}|${isDealer}`;
+          const labelKey = `${player.nickname || player.id}|${chips}|${isDealer}`;
           if (labelEl.dataset.labelKey !== labelKey) {
             labelEl.dataset.labelKey = labelKey;
             const dealerBadge = isDealer ? '<span class="dealer-badge">庄</span>' : '';
-            labelEl.innerHTML = `<span class="player-name">${escapeHtmlLocal(player.id)}${dealerBadge}</span>
+            labelEl.innerHTML = `<span class="player-name">${escapeHtmlLocal(player.nickname || player.id)}${dealerBadge}</span>
               <span class="player-score">筹码: ${chips}</span>`;
           }
         }
@@ -713,11 +725,11 @@
 
         if (nameEl) {
           const isDealer = state.dealer_idx === playerIdx;
-          const nameKey  = `${player.id}|${isDealer}`;
+          const nameKey  = `${player.nickname || player.id}|${isDealer}`;
           if (nameEl.dataset.nameKey !== nameKey) {
             nameEl.dataset.nameKey = nameKey;
             const dealerBadge = isDealer ? '<span class="dealer-badge">庄</span>' : '';
-            nameEl.innerHTML = escapeHtmlLocal(player.id || 'Your hand') + dealerBadge;
+            nameEl.innerHTML = escapeHtmlLocal(player.nickname || player.id || 'Your hand') + dealerBadge;
           }
         }
         if (scoreEl) {

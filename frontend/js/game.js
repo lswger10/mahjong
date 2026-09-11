@@ -4,15 +4,13 @@
 
 // 自动适配本地开发（localhost:8000）和生产环境（当前域名）
 const _isLocal   = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_BASE   = _isLocal ? `http://${window.location.host}` : '';
-const WS_BASE    = _isLocal
-  ? `ws://${window.location.host}`
-  : `wss://${window.location.host}`;
-
-/* ---------- URL params ---------- */
+const API_BASE = (window.location.pathname || '/').replace(/\/[^/]*$/, '');
+const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${API_BASE}`;
 const urlParams  = new URLSearchParams(window.location.search);
 const ROOM_ID    = urlParams.get('room')   || '';
-const PLAYER_ID  = urlParams.get('player') || '';
+let PLAYER_ID = '';
+let currentRevision = 0;
+let roomOwner = false;
 
 /* ---------- App State ---------- */
 let ws             = null;
@@ -261,13 +259,13 @@ function makeTileEl(tileStr, options = {}) {
    WEBSOCKET
    ============================================================ */
 function connect() {
-  if (!ROOM_ID || !PLAYER_ID) {
+  if (!ROOM_ID) {
     setStatus('Missing room or player ID. Please go back to the lobby.', 'error');
     return;
   }
 
   setConnStatus('connecting');
-  const url = `${WS_BASE}/ws/${ROOM_ID}/${PLAYER_ID}`;
+  const url = `${WS_BASE}/ws/${encodeURIComponent(ROOM_ID)}`;
   ws = new WebSocket(url);
 
   ws.onopen = () => {
@@ -290,7 +288,11 @@ function connect() {
     setConnStatus('disconnected');
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
+    if (event.code === 4403 || event.code === 4409) {
+      setStatus('mahjong.connection_unavailable', 'error');
+      return;
+    }
     setConnStatus('disconnected');
     setStatus('Connection lost. Reconnecting in 2 seconds…', 'error');
     reconnectTimer = setTimeout(connect, 2000);
@@ -302,7 +304,7 @@ function sendAction(type, data = {}) {
     setStatus('Not connected to server.', 'error');
     return;
   }
-  const msg = { type, ...data };
+  const msg = { type, ...data, revision: currentRevision };
   ws.send(JSON.stringify(msg));
 }
 
@@ -310,7 +312,23 @@ function sendAction(type, data = {}) {
    MESSAGE HANDLERS
    ============================================================ */
 function handleServerMessage(msg) {
+  if (Number.isInteger(msg.revision)) currentRevision = msg.revision;
+  if (Number.isInteger(msg.state?.revision)) currentRevision = msg.state.revision;
+  if (msg.self_player_id) {
+    PLAYER_ID = msg.self_player_id;
+    myPlayerIdx = msg.player_idx;
+    updateRoomInfo(msg);
+  }
   switch (msg.type) {
+    case 'welcome':
+      PLAYER_ID = msg.self_player_id;
+      myPlayerIdx = msg.player_idx;
+      updateRoomInfo(msg);
+      break;
+    case 'action_result':
+      updateRoomInfo(msg);
+      if (msg.state) handleGameState(msg.state);
+      break;
     case 'game_state':
       handleGameState(msg.state);
       break;
@@ -324,14 +342,44 @@ function handleServerMessage(msg) {
       handleGameOver(msg);
       break;
     case 'error':
-      setStatus('Error: ' + (msg.message || 'Unknown error'), 'error');
+      setStatus(msg.message_key || 'mahjong.action_rejected', 'error');
+      refreshRoom();
       break;
     case 'room_update':
-      // Lobby-only broadcast; no action needed on the game page.
+      updateRoomInfo(msg);
       break;
     default:
       console.warn('Unknown message type:', msg.type);
   }
+}
+
+function updateRoomInfo(info) {
+  roomOwner = info.is_owner;
+  currentRevision = info.revision;
+  document.getElementById('room-code').value = ROOM_ID;
+  document.getElementById('invite-link').value = `${window.location.origin}${API_BASE}/index.html?join=${encodeURIComponent(ROOM_ID)}`;
+  document.getElementById('room-seats').textContent = (info.seats || []).map(s => `${s.seat + 1}: ${s.nickname}${s.left ? '（已退出）' : ''}`).join(' · ');
+  document.getElementById('btn-end-room').hidden = !roomOwner;
+  const waiting = info.room.status === 'waiting';
+  setButtonVisible('btn-start', roomOwner && waiting);
+  setButtonEnabled('btn-start', roomOwner && waiting);
+  document.getElementById('btn-play-again').hidden = !roomOwner || info.room.status === 'closed';
+  if (info.room.status === 'closed') { disableAllActionButtons(); setStatus('mahjong.room_closed', 'error'); }
+}
+
+async function refreshRoom() {
+  const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(ROOM_ID)}`);
+  const info = await res.json();
+  if (!res.ok) { setStatus(info.detail || 'mahjong.room_access_denied', 'error'); return; }
+  updateRoomInfo(info);
+  if (info.state) handleGameState(info.state);
+}
+
+async function roomOperation(operation) {
+  if (operation === 'end' && !confirm('mahjong.confirm_end_room')) return;
+  const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(ROOM_ID)}/${operation}`, {method:'POST'});
+  if (!res.ok) { const error = await res.json(); setStatus(error.detail || 'mahjong.action_rejected', 'error'); return; }
+  window.location.href = 'index.html';
 }
 
 function handleGameState(state) {
@@ -434,6 +482,13 @@ function handleGameState(state) {
 
   renderBoard(state);
   updateActionButtonsForState(state);
+  if (state.room_status === 'closed') {
+    disableAllActionButtons();
+  } else if (state.phase === 'claiming' && state.available_actions?.length) {
+    handleClaimWindow({tile: state.last_discard, actions: state.available_actions});
+  } else if (state.available_actions?.length) {
+    handleActionRequired({player_idx: myPlayerIdx, actions: state.available_actions, drawn_tile: state.drawn_tile});
+  }
 
   // Fade the board back in (removes the instant-hide class set by "Play Again").
   const boardEl = document.querySelector('.board-wrapper');
@@ -542,18 +597,7 @@ function handleGameOver(msg) {
   }
   _myWinSent = false;
 
-  // Determine restart authority.
-  // is_reconnect: any human who rejoins an ended room may start the next game
-  //   (offline players will be replaced by AI automatically).
-  // Normal end-of-game: only the NEXT dealer (or any human if dealer is AI).
-  let canRestart;
-  if (msg.is_reconnect) {
-    canRestart = true;
-  } else {
-    const nextDealerIdx = msg.next_dealer_idx ?? gameState?.dealer_idx ?? 0;
-    const dealerIsAI = gameState?.players?.[nextDealerIdx]?.id?.startsWith('ai_player_') ?? true;
-    canRestart = myPlayerIdx === nextDealerIdx || dealerIsAI;
-  }
+  const canRestart = roomOwner;
 
   // chip_changes is computed by the backend at settlement time and persisted on
   // the Room, so it's correct even for reconnects (where prevChips == newChips).
@@ -614,7 +658,7 @@ function renderBoard(state) {
     const phase = state.phase || '';
     const currentTurnIdx = state.current_turn ?? -1;
 
-    if (phase === 'waiting' || phase === 'lobby') {
+    if (roomOwner && (phase === 'waiting' || phase === 'lobby')) {
       setStatus('Waiting for players. Click "Start Game" when ready.');
     } else if (currentTurnIdx === myPlayerIdx) {
       setStatus('Your turn.');
@@ -634,7 +678,7 @@ function renderMyHand(player, playerIdx, state) {
     const chips = (state.cumulative_scores || {})[player.id] ?? '–';
     const isDealer = (state.dealer_idx === playerIdx);
     const dealerBadge = isDealer ? '<span class="dealer-badge">庄</span>' : '';
-    labelEl.innerHTML = `<span class="player-name">${escapeHtml(player.id)}${dealerBadge}</span>
+    labelEl.innerHTML = `<span class="player-name">${escapeHtml(player.nickname || player.id)}${dealerBadge}</span>
       <span class="player-score">筹码: ${chips}</span>`;
   }
 
@@ -687,7 +731,7 @@ function renderOpponent(player, playerIdx, position, state, discardPile) {
   const chips = (state.cumulative_scores || {})[player.id] ?? '–';
   const isDealer = (state.dealer_idx === playerIdx);
   const dealerBadge = isDealer ? '<span class="dealer-badge">庄</span>' : '';
-  labelEl.innerHTML = `<span class="player-name">${escapeHtml(player.id)}${dealerBadge}</span>
+  labelEl.innerHTML = `<span class="player-name">${escapeHtml(player.nickname || player.id)}${dealerBadge}</span>
     <span class="player-score">筹码: ${chips}</span>`;
 
   // Hand (face-down tiles)
@@ -766,7 +810,7 @@ function renderCenterTable(state, discards, players) {
     const visible = pile.slice(-12); // show at most last 12 tiles
 
     // Update the label text without touching tiles (guard against no-op writes).
-    const lblText = players[i] ? players[i].id : `P${i + 1}`;
+    const lblText = players[i] ? (players[i].nickname || players[i].id) : `P${i + 1}`;
     let lbl = pileEl.querySelector('.discard-pile-label');
     if (lbl) {
       if (lbl.textContent !== lblText) lbl.textContent = lblText;
@@ -877,7 +921,7 @@ function updateActionButtonsForState(state) {
   const isMyTurn = state.current_turn === myPlayerIdx;
 
   // Start Game button: visible in waiting/lobby phase
-  setButtonVisible('btn-start', phase === 'waiting' || phase === 'lobby');
+  setButtonVisible('btn-start', roomOwner && (phase === 'waiting' || phase === 'lobby'));
 
   // During normal play
   if (phase !== 'waiting' && phase !== 'lobby') {
@@ -1545,8 +1589,7 @@ function showGameOverModal(winnerName, scores, cumulativeScores, roundNumber, ha
     scoresEl.appendChild(tr);
   });
 
-  // Control "Play Again" button based on dealer authority.
-  // Only the dealer (庄家) may restart; others see a disabled hint.
+  // Restart authority comes from the authenticated room owner.
   const playAgainBtn = document.getElementById('btn-play-again');
   if (playAgainBtn) {
     if (canRestart) {
@@ -1555,8 +1598,8 @@ function showGameOverModal(winnerName, scores, cumulativeScores, roundNumber, ha
       playAgainBtn.textContent = 'Play Again 再来一局';
     } else {
       playAgainBtn.disabled = true;
-      playAgainBtn.title = '只有庄家可以重开 / Only the dealer can restart';
-      playAgainBtn.textContent = '等待庄家重开…';
+      playAgainBtn.title = 'mahjong.owner_required';
+      playAgainBtn.textContent = '等待房主开局';
     }
   }
 
@@ -1690,6 +1733,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   setButtonEnabled('btn-discard', false);
 
+  document.getElementById('btn-leave-room').addEventListener('click', () => roomOperation('leave'));
+  document.getElementById('btn-end-room').addEventListener('click', () => roomOperation('end'));
+  document.getElementById('btn-copy-invite').addEventListener('click', async () => {
+    const field = document.getElementById('invite-link');
+    field.select();
+    try { await navigator.clipboard.writeText(field.value); }
+    catch { setStatus('mahjong.copy_manually', 'info'); }
+  });
   // Connect WebSocket
   connect();
 

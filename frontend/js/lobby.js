@@ -3,27 +3,33 @@
    ============================================================ */
 
 // 自动适配本地开发和生产环境
-const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? `http://${window.location.host}`
-  : '';
+const API_BASE = (window.location.pathname || '/').replace(/\/[^/]*$/, '');
 let playerId = null;
 let refreshTimer = null;
 
 /* ---------- Initialisation ---------- */
-function init() {
-  playerId = localStorage.getItem('mahjong_player_id');
-  if (!playerId) {
-    playerId = 'p_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    localStorage.setItem('mahjong_player_id', playerId);
-  }
+async function saveGuest() {
+  const nickname = document.getElementById('nickname').value.trim();
+  const res = await fetch(`${API_BASE}/api/guest`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(nickname ? {nickname} : {})});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || 'mahjong.session_unavailable');
+  playerId = data.id;
+  document.getElementById('nickname').value = data.nickname;
+  document.getElementById('player-id-display').textContent = data.nickname;
+}
 
-  const pidEl = document.getElementById('player-id-display');
-  if (pidEl) pidEl.textContent = playerId;
-
+async function init() {
+  const back = document.getElementById('back-entertainment');
+  back.hidden = window.parent === window;
+  back.onclick = () => window.parent.postMessage({type:'aevi:mahjong-back'}, window.location.origin);
   document.getElementById('btn-create-room').addEventListener('click', createRoom);
-
-  fetchRooms();
-  refreshTimer = setInterval(fetchRooms, 3000);
+  document.getElementById('btn-join-room').addEventListener('click', () => joinRoom(document.getElementById('room-code').value.trim()));
+  document.getElementById('room-code').value = new URLSearchParams(window.location.search).get('join') || '';
+  try {
+    await saveGuest();
+    await fetchRooms();
+    refreshTimer = setInterval(fetchRooms, 3000);
+  } catch (error) { showTableError(error.message); }
 }
 
 /* ---------- Fetch & render rooms ---------- */
@@ -119,16 +125,17 @@ async function createRoom() {
   if (name === null) return; // user cancelled
 
   try {
+    await saveGuest();
     // Create room
     const createRes = await fetch(`${API_BASE}/api/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name.trim() || undefined, player_id: playerId })
+      body: JSON.stringify({ name: name.trim() || undefined, ai_fill: document.getElementById('ai-fill').checked })
     });
 
     if (!createRes.ok) {
       const err = await createRes.json().catch(() => ({}));
-      alert('Failed to create room: ' + (err.detail || createRes.status));
+      alert(err.detail || 'mahjong.create_failed');
       return;
     }
 
@@ -139,22 +146,24 @@ async function createRoom() {
     await joinRoom(roomId, true);
   } catch (err) {
     console.error('createRoom error:', err);
-    alert('Error creating room: ' + err.message);
+    alert(err.message);
   }
 }
 
 /* ---------- Join room ---------- */
 async function joinRoom(roomId, skipAlert) {
   try {
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(roomId)) throw new Error('mahjong.invalid_invitation');
+    await saveGuest();
     const res = await fetch(`${API_BASE}/api/rooms/${roomId}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ player_id: playerId })
+      body: JSON.stringify({})
     });
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert('Failed to join room: ' + (err.detail || res.status));
+      alert(err.detail || 'mahjong.join_failed');
       return;
     }
 
@@ -167,10 +176,10 @@ async function joinRoom(roomId, skipAlert) {
     }
 
     clearInterval(refreshTimer);
-    window.location.href = `game.html?room=${encodeURIComponent(actualRoomId)}&player=${encodeURIComponent(playerId)}`;
+    window.location.href = `game.html?room=${encodeURIComponent(actualRoomId)}`;
   } catch (err) {
     console.error('joinRoom error:', err);
-    alert('Error joining room: ' + err.message);
+    alert(err.message);
   }
 }
 

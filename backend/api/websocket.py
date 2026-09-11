@@ -2,7 +2,7 @@
 websocket.py - WebSocket endpoint for real-time Mahjong gameplay.
 
 Endpoint:
-  WS /ws/{room_id}/{player_id}
+  WS /ws/{room_id} (server Guest Session cookie)
 
 Client → Server messages:
   {"type": "discard",    "tile": "<TILE>"}
@@ -29,7 +29,8 @@ import logging
 import random
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from api.access import principal, member, view
 
 from game.game_state import GameState
 from game.ai_player import AIPlayer
@@ -65,51 +66,30 @@ CHIP_CAP = 64
 AI_DELAY_MIN = 0.2
 AI_DELAY_MAX = 0.6
 
-# Seconds to wait after a disconnect before handing the seat to AI.
-# During this window the player can reconnect and resume control.
-AI_TAKEOVER_GRACE = 20.0
-
-# Pending AI-takeover tasks keyed by "{room_id}:{player_id}".
-_ai_takeover_tasks: dict[str, asyncio.Task] = {}
+# Per-room tasks are cancelled only by explicit room closure / process shutdown.
+_room_jobs = {}
 
 
-# ---------------------------------------------------------------------------
-# Grace-period AI takeover
-# ---------------------------------------------------------------------------
+def stop_room(room_id):
+    for (rid, _), task in list(_room_jobs.items()):
+        if rid == room_id:
+            task.cancel()
 
-async def _delayed_ai_takeover(room_id: str, player_id: str) -> None:
-    """Wait AI_TAKEOVER_GRACE seconds, then take over the seat with AI.
 
-    If the player reconnects before the timer fires the task is cancelled and
-    this function never reaches the takeover logic.
-    """
-    await asyncio.sleep(AI_TAKEOVER_GRACE)
-
-    key = f"{room_id}:{player_id}"
-    _ai_takeover_tasks.pop(key, None)
-
-    # Abort if the player has already reconnected.
-    if player_id in _connections.get(room_id, {}):
-        return
-
-    room = room_manager.get_room(room_id)
-    if room is None or room.game_state is None or room.status != "playing":
-        return
-
-    gs = room.game_state
-    pidx = _player_index(gs, player_id)
-    if pidx is None:
-        return
-
-    gs.players[pidx].is_ai = True
-    logger.info(
-        "Player %s grace period expired; seat %d handed to AI",
-        player_id, pidx,
-    )
-    if gs.phase != "ended":
-        asyncio.create_task(_run_ai_turn(room_id))
-
-    await _broadcast_room_update()
+def room_job(fn):
+    async def run(room_id):
+        key = (room_id, fn.__name__)
+        if key in _room_jobs:
+            return
+        room = room_manager.get_room(room_id)
+        if not room or room.status != 'playing':
+            return
+        _room_jobs[key] = asyncio.current_task()
+        try:
+            await fn(room_id)
+        finally:
+            _room_jobs.pop(key, None)
+    return run
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +113,7 @@ async def _broadcast(room_id: str, payload: dict, exclude: Optional[str] = None)
         await _send(ws, payload)
 
 
-async def _broadcast_game_state(room_id: str) -> None:
+async def _broadcast_game_state(room_id: str, *, advance=False) -> None:
     """
     Send each connected player their personalised view of the game state.
     Other players' hands are hidden.
@@ -143,22 +123,30 @@ async def _broadcast_game_state(room_id: str) -> None:
         return
 
     gs = room.game_state
-    room_conns = _connections.get(room_id, {})
+    room_manager.save_room(room)
+    try:
+        for pid, ws in list(_connections.get(room_id, {}).items()):
+            if pid not in room.members or room.members[pid]['left']:
+                continue
+            await _send(ws, {"type": "game_state", "state": view(room_manager, room_id, pid)['state']})
+    finally:
+        # The durable action keeps its continuation even if HTTP/MCP is cancelled
+        # during network output. Existing claim owner finishes before AI resumes.
+        if advance and (gs.phase == 'claiming' or room_id not in _claim_window_active):
+            fn = _handle_claim_window if gs.phase == 'claiming' else _run_ai_turn
+            asyncio.create_task(fn(room_id))
+    if advance and gs.phase == 'ended':
+        await _handle_game_over(room_id)
 
-    for pid, ws in list(room_conns.items()):
-        player_idx = _player_index(gs, pid)
-        state_dict = gs.to_dict(viewing_player_idx=player_idx)
-        state_dict["cumulative_scores"] = dict(room.cumulative_scores)
-        state_dict["round_number"] = room.round_number
-        await _send(ws, {"type": "game_state", "state": state_dict})
 
-
-async def _broadcast_room_update() -> None:
-    """Notify all connected clients in every room about room list changes."""
-    rooms_payload = [r.to_dict() for r in room_manager.get_rooms()]
-    for room_id, room_conns in _connections.items():
-        for ws in list(room_conns.values()):
-            await _send(ws, {"type": "room_update", "rooms": rooms_payload})
+async def _broadcast_room_update(room_id: str) -> None:
+    """Membership updates stay inside the room that changed."""
+    room = room_manager.get_room(room_id)
+    if not room:
+        return
+    for pid, ws in list(_connections.get(room_id, {}).items()):
+        if pid in room.members and not room.members[pid]['left']:
+            await _send(ws, {"type": "room_update", **view(room_manager, room_id, pid)})
 
 
 async def _send_action_required(room_id: str, player_idx: int) -> None:
@@ -228,6 +216,7 @@ def _player_index(gs: GameState, player_id: str) -> Optional[int]:
 # AI automation
 # ---------------------------------------------------------------------------
 
+@room_job
 async def _run_ai_turn(room_id: str) -> None:
     """
     Drive AI actions until it is a human player's turn (or the game ends).
@@ -243,6 +232,8 @@ async def _run_ai_turn(room_id: str) -> None:
 
     # Safety: keep looping while it is an AI player's turn
     while True:
+        if room.status != "playing" or room.game_state is not gs:
+            return
         if gs.phase == "ended":
             await _handle_game_over(room_id)
             return
@@ -337,7 +328,7 @@ async def _run_ai_turn(room_id: str) -> None:
 
                 # After an AI discard, handle the claim window
                 if gs.phase == "claiming":
-                    await _handle_claim_window(room_id)
+                    asyncio.create_task(_handle_claim_window(room_id))
                     return  # _handle_claim_window will resume the loop
                 # If no claim window (shouldn't normally happen), continue
                 continue
@@ -350,6 +341,7 @@ async def _run_ai_turn(room_id: str) -> None:
             return
 
 
+@room_job
 async def _handle_claim_window(room_id: str) -> None:
     """
     Manage the claim window after a discard.
@@ -368,6 +360,7 @@ async def _handle_claim_window(room_id: str) -> None:
     if gs.phase != "claiming":
         return
 
+    claims = gs._pending_claims
     _claim_window_active.add(room_id)
     try:
         tile = gs.last_discard
@@ -390,6 +383,8 @@ async def _handle_claim_window(room_id: str) -> None:
         # Broadcast claim window only to humans who still have a real choice
         if gs.phase == "claiming":
             await _send_claim_window(room_id, tile)
+            if gs._pending_claims is not claims:
+                return
 
         # Collect AI claim decisions and introduce a simulated human delay
         ai_decisions = []
@@ -431,6 +426,9 @@ async def _handle_claim_window(room_id: str) -> None:
             # Slight delay even if all AI just skip, to avoid instantaneous closing
             await asyncio.sleep(random.uniform(0.3, 0.8))
 
+        if gs._pending_claims is not claims:
+            return
+
         # Now apply the AI decisions
         for i, action, data in ai_decisions:
             if gs.phase != "claiming" or i not in gs._pending_claims:
@@ -461,18 +459,21 @@ async def _handle_claim_window(room_id: str) -> None:
         # If the claim window is still open, wait for human responses with a timeout
         if gs.phase == "claiming":
             try:
-                await asyncio.wait_for(_wait_for_claim_window(room_id), timeout=CLAIM_TIMEOUT)
+                await asyncio.wait_for(_wait_for_claim_window(room_id, claims), timeout=CLAIM_TIMEOUT)
             except asyncio.TimeoutError:
                 # Force-skip ALL remaining pending claims (human or temporarily-AI-marked).
                 # Skipping only "not is_ai" players would miss players who disconnected
                 # mid-window and were temporarily marked as AI, leaving the window stuck.
-                if gs.phase == "claiming":
+                if gs.phase == "claiming" and gs._pending_claims is claims:
                     for i in list(gs._pending_claims):
                         if i not in gs._skipped_claims:
                             try:
                                 gs.skip_claim(i)
                             except ValueError:
                                 pass
+
+        if gs._pending_claims is not claims:
+            return
 
         # Safety net: if claim window is still open after all handling, force-resolve.
         # This guards against unexpected states (e.g. all pending players were AI-marked).
@@ -489,9 +490,15 @@ async def _handle_claim_window(room_id: str) -> None:
     finally:
         # Always clear the active flag so future claim windows can be handled.
         _claim_window_active.discard(room_id)
+        if room.status == 'playing' and gs.phase == 'claiming' and gs._pending_claims is not claims:
+            asyncio.create_task(_handle_claim_window(room_id))
 
     # Broadcast updated state after resolution
     await _broadcast_game_state(room_id)
+    if gs.phase == 'claiming' and gs._pending_claims is not claims:
+        # A human may discard again while the resolved state is being sent.
+        asyncio.create_task(_handle_claim_window(room_id))
+        return
 
     if gs.phase == "ended":
         await _handle_game_over(room_id)
@@ -508,13 +515,13 @@ async def _handle_claim_window(room_id: str) -> None:
     asyncio.create_task(_run_ai_turn(room_id))
 
 
-async def _wait_for_claim_window(room_id: str) -> None:
+async def _wait_for_claim_window(room_id: str, claims) -> None:
     """Busy-wait (polling) until the claim window closes."""
     while True:
         room = room_manager.get_room(room_id)
         if room is None or room.game_state is None:
             return
-        if room.game_state.phase != "claiming":
+        if room.game_state.phase != "claiming" or room.game_state._pending_claims is not claims:
             return
         await asyncio.sleep(0.1)
 
@@ -529,7 +536,7 @@ async def _handle_game_over(room_id: str) -> None:
     # handler and _handle_claim_window detect phase=="ended" and call this
     # function.  The first call must complete chip settlement and broadcast;
     # the second call must be a no-op to avoid double-settling chips.
-    if room.status == "ended":
+    if room.status in ("ended", "closed"):
         return
 
     gs = room.game_state
@@ -644,7 +651,18 @@ async def _handle_game_over(room_id: str) -> None:
         for pid in pre_scores
     }
 
-    payload = {
+    payload = game_over_payload(room)
+    room_manager.save_room(room)
+    await _broadcast(room_id, payload)
+    await _broadcast_room_update(room_id)
+
+
+def game_over_payload(room):
+    gs = room.game_state
+    winner_id = gs.winner
+    winner_idx = _player_index(gs, winner_id) if winner_id else None
+    scores = {p.id: p.score for p in gs.players}
+    return {
         "type": "game_over",
         "winner_idx": winner_idx,
         "winner_id": winner_id,
@@ -659,153 +677,95 @@ async def _handle_game_over(room_id: str) -> None:
         "dealer_idx": gs.dealer_idx,          # current round's dealer (for display)
         "next_dealer_idx": room.dealer_idx,  # already updated by dealer-rotation logic above
     }
-    await _broadcast(room_id, payload)
-    await _broadcast_room_update()
 
 
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
 
-@router.websocket("/ws/{room_id}/{player_id}")
-async def websocket_endpoint(ws: WebSocket, room_id: str, player_id: str):
+@router.websocket("/ws/{room_id}")
+async def websocket_endpoint(ws: WebSocket, room_id: str):
+    try:
+        who = principal(ws)
+        room = member(room_manager, room_id, who['id'])
+        if ws.query_params:
+            raise HTTPException(400, 'mahjong.identity_parameters_forbidden')
+    except HTTPException:
+        await ws.close(code=4403)
+        return
+    player_id = who['id']
     await ws.accept()
-
-    # Register connection
-    if room_id not in _connections:
-        _connections[room_id] = {}
+    old = _connections.setdefault(room_id, {}).get(player_id)
     _connections[room_id][player_id] = ws
-
-    logger.info("WS connected: room=%s player=%s", room_id, player_id)
-
-    # Send current game state if a game is already running
-    room = room_manager.get_room(room_id)
-    if room and room.game_state:
+    if old and old is not ws:
+        await old.close(code=4409)
+    await _send(ws, {'type': 'game_state' if room.game_state else 'welcome', **view(room_manager, room_id, player_id)})
+    if room.game_state:
         gs = room.game_state
-        player_idx = _player_index(gs, player_id)
-
-        # Cancel any pending AI-takeover grace-period timer for this player.
-        key = f"{room_id}:{player_id}"
-        pending_task = _ai_takeover_tasks.pop(key, None)
-        if pending_task is not None:
-            pending_task.cancel()
-            logger.info(
-                "Player %s reconnected within grace period; AI takeover cancelled for seat %d",
-                player_id, player_idx,
-            )
-
-        # Restore human control when a player reconnects after disconnect.
-        # The grace period may have expired and is_ai been set to True already;
-        # restore it here regardless so the human can always take back their seat.
-        if player_idx is not None and not player_id.startswith("ai_player_"):
-            if gs.players[player_idx].is_ai:
-                gs.players[player_idx].is_ai = False
-                logger.info(
-                    "Player %s reconnected; seat %d restored to human control",
-                    player_id, player_idx,
-                )
-
-        # New human player joining a game already in progress: assign them to
-        # an available AI seat so they can actually play instead of spectating.
-        # This allows multiple human players to join at different times —
-        # each takes over the next available AI-controlled seat.
-        if player_idx is None and not player_id.startswith("ai_player_") and room.status == "playing":
-            for i, p in enumerate(gs.players):
-                if p.is_ai and p.id.startswith("ai_player_"):
-                    p.id = player_id
-                    p.is_ai = False
-                    player_idx = i
-                    if player_id not in room.human_players:
-                        room.human_players.append(player_id)
-                    logger.info(
-                        "Player %s joined in-progress game; took over AI seat %d",
-                        player_id, i,
-                    )
-                    break
-
-        state_dict = gs.to_dict(viewing_player_idx=player_idx)
-        state_dict["cumulative_scores"] = dict(room.cumulative_scores)
-        state_dict["round_number"] = room.round_number
-        await _send(ws, {"type": "game_state", "state": state_dict})
-
-        if gs.phase == "ended":
-            # Re-send the game_over payload so the reconnecting player sees the
-            # results modal with a "Play Again" button.  is_reconnect=True tells
-            # the frontend to skip sounds and allow ANY human to restart (not
-            # just the next dealer), since multiple players may rejoin at different
-            # times and we want anyone to be able to kick off the next game.
-            winner_id = gs.winner
-            winner_idx = _player_index(gs, winner_id) if winner_id else None
-            scores = {p.id: p.score for p in gs.players}
-            await _send(ws, {
-                "type": "game_over",
-                "winner_idx": winner_idx,
-                "winner_id": winner_id,
-                "scores": scores,
-                "cumulative_scores": dict(room.cumulative_scores),
-                "chip_changes": dict(room.last_chip_changes),
-                "round_number": room.round_number,
-                "han_breakdown": gs.han_breakdown,
-                "han_total": gs.han_total,
-                "winning_tile": gs.winning_tile,
-                "win_ron": gs.win_ron,
-                "dealer_idx": gs.dealer_idx,
-                "next_dealer_idx": room.dealer_idx,
-                "is_reconnect": True,
-            })
-
-        if gs.phase != "ended":
-            if gs.current_turn is not None:
-                current = gs.players[gs.current_turn]
-                if current.id == player_id:
-                    # If reconnecting mid-draw, auto-draw before prompting
-                    if gs.phase == "drawing":
-                        asyncio.create_task(_run_ai_turn(room_id))
-                    else:
-                        await _send_action_required(room_id, gs.current_turn)
-                elif gs.phase == "claiming":
-                    if player_idx is not None and player_idx in gs._pending_claims:
-                        actions = gs.get_available_actions(player_idx)
-                        await _send(ws, {
-                            "type": "claim_window",
-                            "tile": gs.last_discard,
-                            "actions": actions,
-                        })
-
-    await _broadcast_room_update()
-
+        idx = room.human_players.index(player_id)
+        if gs.phase == 'ended':
+            await _send(ws, {**game_over_payload(room), 'is_reconnect': True})
+        elif gs.phase == 'claiming':
+            await _send(ws, {'type': 'claim_window', 'tile': gs.last_discard, 'actions': gs.get_available_actions(idx)})
+        else:
+            await _send_action_required(room_id, idx)
+    await _broadcast_room_update(room_id)
     try:
         while True:
             data = await ws.receive_json()
-            await _handle_message(room_id, player_id, ws, data)
+            try:
+                principal(ws)
+                if _connections.get(room_id, {}).get(player_id) is not ws:
+                    raise HTTPException(403, 'mahjong.connection_replaced')
+                result = await submit(room_id, player_id, data)
+                await _send(ws, {'type': 'action_result', **result})
+            except HTTPException as error:
+                await _send(ws, {'type': 'error', 'message_key': error.detail})
+            except (ValueError, TypeError):
+                await _send(ws, {'type': 'error', 'message_key': 'mahjong.invalid_action'})
     except WebSocketDisconnect:
-        logger.info("WS disconnected: room=%s player=%s", room_id, player_id)
-    except Exception as e:
-        logger.exception("WS error: room=%s player=%s error=%s", room_id, player_id, e)
+        pass
     finally:
-        # Unregister
-        if room_id in _connections:
-            _connections[room_id].pop(player_id, None)
+        if _connections.get(room_id, {}).get(player_id) is ws:
+            _connections[room_id].pop(player_id)
             if not _connections[room_id]:
                 del _connections[room_id]
+        # No leave and no AI takeover: the same server identity keeps its seat.
 
-        # If game in progress, start a grace-period timer before handing the
-        # seat to AI.  If the player reconnects within AI_TAKEOVER_GRACE
-        # seconds the task is cancelled and they resume human control.
-        room = room_manager.get_room(room_id)
-        if room and room.game_state and room.status == "playing":
-            gs = room.game_state
-            pidx = _player_index(gs, player_id)
-            if pidx is not None and not player_id.startswith("ai_player_"):
-                key = f"{room_id}:{player_id}"
-                task = asyncio.create_task(_delayed_ai_takeover(room_id, player_id))
-                _ai_takeover_tasks[key] = task
-                logger.info(
-                    "Player %s disconnected; AI takeover grace period started for seat %d",
-                    player_id, pidx,
-                )
 
-        await _broadcast_room_update()
+class ActionReceipt:
+    def __init__(self):
+        self.error = None
+
+    async def send_json(self, payload):
+        if payload.get('type') == 'error':
+            self.error = payload.get('message', '')
+
+
+async def submit(room_id, player_id, data):
+    room = member(room_manager, room_id, player_id)
+    if not isinstance(data, dict) or set(data) - {'type', 'tile', 'tiles', 'revision'}:
+        raise HTTPException(400, 'mahjong.invalid_action')
+    if type(data.get('revision')) is not int or data['revision'] != room.revision:
+        raise HTTPException(409, 'mahjong.read_required')
+    kind = data.get('type')
+    if kind in ('start_game', 'restart_game'):
+        member(room_manager, room_id, player_id, owner=True)
+        if (not room.ai_fill and len(room.human_players) != 4) or any(m['left'] for m in room.members.values()):
+            raise HTTPException(409, 'mahjong.players_not_ready')
+    elif room.status != 'playing' or not room.game_state or kind not in room.game_state.get_available_actions(room.human_players.index(player_id)):
+        raise HTTPException(409, 'mahjong.action_unavailable')
+    if 'tile' in data and (not isinstance(data['tile'], str) or len(data['tile']) > 32):
+        raise HTTPException(400, 'mahjong.invalid_action')
+    if 'tiles' in data and (not isinstance(data['tiles'], list) or len(data['tiles']) != 2 or any(not isinstance(t, str) or len(t) > 32 for t in data['tiles'])):
+        raise HTTPException(400, 'mahjong.invalid_action')
+    # Validation and rule mutation occur before the dispatcher's first await.
+    receipt = ActionReceipt()
+    await _handle_message(room_id, player_id, receipt, data)
+    if receipt.error:
+        logger.info('Rejected rule action: %s', receipt.error)
+        raise HTTPException(409, 'mahjong.action_rejected')
+    return view(room_manager, room_id, player_id)
 
 
 # ---------------------------------------------------------------------------
@@ -828,20 +788,13 @@ async def _handle_message(
             await _send(ws, {"type": "error", "message": "Game already started."})
             return
         try:
+            stop_room(room_id)
             room_manager.start_game(room_id)
         except Exception as e:
             await _send(ws, {"type": "error", "message": str(e)})
             return
 
-        await _broadcast_game_state(room_id)
-        await _broadcast_room_update()
-
-        gs = room.game_state
-        # If the current player (dealer) is AI, kick off AI turns
-        if gs.players[gs.current_turn].is_ai:
-            asyncio.create_task(_run_ai_turn(room_id))
-        else:
-            await _send_action_required(room_id, gs.current_turn)
+        await _broadcast_game_state(room_id, advance=True)
         return
 
     # ---- restart_game -----------------------------------------------------
@@ -850,44 +803,23 @@ async def _handle_message(
             await _send(ws, {"type": "error", "message": "Game has not ended yet."})
             return
         try:
+            stop_room(room_id)
             room_manager.start_game(room_id)  # resets status "ended"→"waiting"→"playing"
         except Exception as e:
             await _send(ws, {"type": "error", "message": str(e)})
             return
 
-        # Mark human players who are currently offline as AI-controlled so the
-        # game does not stall waiting for disconnected players to act.  When an
-        # offline player reconnects the existing reconnect logic automatically
-        # restores them to human control and they can take over their seat.
         gs = room.game_state
-        room_conns = _connections.get(room_id, {})
-        for i, player in enumerate(gs.players):
-            if not player.id.startswith("ai_player_") and player.id not in room_conns:
-                player.is_ai = True
-                logger.info(
-                    "Player %s is offline at restart; seat %d marked AI-controlled",
-                    player.id, i,
-                )
-
-        await _broadcast_game_state(room_id)
-        await _broadcast_room_update()
-
-        if gs.players[gs.current_turn].is_ai:
-            asyncio.create_task(_run_ai_turn(room_id))
-        else:
-            await _send_action_required(room_id, gs.current_turn)
+        await _broadcast_game_state(room_id, advance=True)
         return
 
-    # All subsequent messages require an active game
-    if room.game_state is None or room.status != "playing":
-        await _send(ws, {"type": "error", "message": "Game is not active."})
+    if room.game_state is None or room.status != 'playing':
+        await _send(ws, {'type': 'error', 'message': 'Game is not active.'})
         return
-
     gs = room.game_state
     player_idx = _player_index(gs, player_id)
-
     if player_idx is None:
-        await _send(ws, {"type": "error", "message": "Player not found in game."})
+        await _send(ws, {'type': 'error', 'message': 'Player not found in game.'})
         return
 
     # ---- discard ----------------------------------------------------------
@@ -902,14 +834,7 @@ async def _handle_message(
             await _send(ws, {"type": "error", "message": str(e)})
             return
 
-        await _broadcast_game_state(room_id)
-
-        if gs.phase == "ended":
-            await _handle_game_over(room_id)
-            return
-
-        if gs.phase == "claiming":
-            asyncio.create_task(_handle_claim_window(room_id))
+        await _broadcast_game_state(room_id, advance=True)
         return
 
     # ---- win --------------------------------------------------------------
@@ -935,10 +860,7 @@ async def _handle_message(
                     except ValueError:
                         pass
 
-        await _broadcast_game_state(room_id)
-
-        if gs.phase == "ended":
-            await _handle_game_over(room_id)
+        await _broadcast_game_state(room_id, advance=True)
         return
 
     # ---- pung -------------------------------------------------------------
@@ -956,15 +878,7 @@ async def _handle_message(
             await _send(ws, {"type": "error", "message": "Cannot pung that tile."})
             return
 
-        await _broadcast_game_state(room_id)
-
-        if gs.phase == "ended":
-            await _handle_game_over(room_id)
-            return
-
-        # If claim window closed, handle next turn
-        if gs.phase != "claiming":
-            asyncio.create_task(_run_ai_turn(room_id))
+        await _broadcast_game_state(room_id, advance=True)
         return
 
     # ---- chow -------------------------------------------------------------
@@ -983,14 +897,7 @@ async def _handle_message(
             await _send(ws, {"type": "error", "message": "Cannot chow with those tiles."})
             return
 
-        await _broadcast_game_state(room_id)
-
-        if gs.phase == "ended":
-            await _handle_game_over(room_id)
-            return
-
-        if gs.phase != "claiming":
-            asyncio.create_task(_run_ai_turn(room_id))
+        await _broadcast_game_state(room_id, advance=True)
         return
 
     # ---- kong -------------------------------------------------------------
@@ -1010,20 +917,7 @@ async def _handle_message(
             await _send(ws, {"type": "error", "message": str(e)})
             return
 
-        await _broadcast_game_state(room_id)
-
-        if gs.phase == "ended":
-            await _handle_game_over(room_id)
-            return
-
-        if gs.phase == "claiming":
-            # Extend-pung (加杠) opened a rob-kong window.
-            # Without this, the window sits unhandled forever and the player
-            # never receives action_required — "no actions after kong" bug.
-            if room_id not in _claim_window_active:
-                asyncio.create_task(_handle_claim_window(room_id))
-        else:
-            asyncio.create_task(_run_ai_turn(room_id))
+        await _broadcast_game_state(room_id, advance=True)
         return
 
     # ---- skip -------------------------------------------------------------
@@ -1037,23 +931,7 @@ async def _handle_message(
             await _send(ws, {"type": "error", "message": str(e)})
             return
 
-        await _broadcast_game_state(room_id)
-
-        if gs.phase == "ended":
-            await _handle_game_over(room_id)
-            return
-
-        if gs.phase != "claiming":
-            # Claim window resolved. If _handle_claim_window is still running it
-            # will also create _run_ai_turn when _wait_for_claim_window wakes up;
-            # only kick off our own task when no handler is active to avoid races.
-            if room_id not in _claim_window_active:
-                asyncio.create_task(_run_ai_turn(room_id))
-        else:
-            # Window still open (shouldn't happen in single-human play, but guard
-            # against it: restart the handler if it's no longer active).
-            if room_id not in _claim_window_active:
-                asyncio.create_task(_handle_claim_window(room_id))
+        await _broadcast_game_state(room_id, advance=True)
         return
 
     # ---- unknown ----------------------------------------------------------
