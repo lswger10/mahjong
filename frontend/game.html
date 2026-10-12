@@ -3,11 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>麻將遊戲 – Game Board</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&display=swap" />
-  <link rel="stylesheet" href="css/style.css" />
+  <title>小家 · 花园麻将桌</title>
+  <link rel="stylesheet" href="css/style.css?v=20261012garden" />
   <style>
     /* ---- Game page specific layout overrides ---- */
     body {
@@ -45,8 +42,8 @@
       flex-direction: column;
       align-items: center;
       gap: 4px;
-      background: rgba(0,60,0,0.45);
-      border: 2px solid #4a9a4a;
+      background: #eaf0df;
+      border: 2px solid #90a68b;
       border-radius: 8px;
       padding: 6px;
       overflow: visible; /* allow selected tile to lift above the border */
@@ -127,7 +124,7 @@
     /* 自己的弃牌堆：金色边框 + 淡绿底 */
     .discard-pile.my-discard-pile {
       border-color: rgba(212, 160, 23, 0.55);
-      background: rgba(0, 50, 0, 0.35);
+      background: #dbe6d2;
     }
 
     .discard-pile-label {
@@ -402,16 +399,16 @@
     }
   </style>
 </head>
-<body>
+<body class="garden-mahjong garden-mahjong-board">
 
   <!-- ====================================================
        TOP BAR
   ==================================================== -->
   <div id="topbar">
-    <h1>麻將遊戲</h1>
+    <h1>花园麻将桌</h1>
     <div id="room-info">麻将房间</div>
     <details style="position:relative"><summary>房间 / 邀请</summary>
-      <div style="position:absolute;right:0;top:28px;width:min(360px,85vw);padding:16px;background:#173d30;z-index:100;border:1px solid #aaa;border-radius:12px;display:grid;gap:10px">
+      <div class="garden-room-menu" style="position:absolute;right:0;top:44px;width:min(360px,85vw);padding:16px;background:var(--paper);z-index:100;border:1px solid var(--tile-border);border-radius:16px;display:grid;gap:10px">
         <label>房间码 <input id="room-code" readonly style="width:100%" /></label>
         <label>朋友邀请链接 <input id="invite-link" readonly style="width:100%" /></label>
         <button id="btn-copy-invite" class="btn">复制邀请链接</button>

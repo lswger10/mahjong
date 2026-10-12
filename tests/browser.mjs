@@ -77,12 +77,17 @@ try {
     await a.frameLocator('#table').locator('#back-entertainment').click();
     await a.locator('#table').waitFor({state:'detached'});
   }
-  await a.goto(origin+'/mahjong/');await a.locator('#nickname').fill('薇薇测试');
+  await a.goto(origin+'/mahjong/');
+  assert.equal(await a.locator('body').getAttribute('class'),'garden-mahjong');
+  if(process.env.MAHJONG_SCREENSHOT){await a.screenshot({path:process.env.MAHJONG_SCREENSHOT.replace('.png','-lobby.png')});}
+  await a.locator('#nickname').fill('薇薇测试');
   a.once('dialog',d=>d.accept('浏览器人工牌桌'));await a.locator('#btn-create-room').click();await a.waitForURL('**/game.html?room=*');
   const rid=new URL(a.url()).searchParams.get('room');
   await b.goto(origin+'/mahjong/?join='+rid);await b.locator('#nickname').fill('朋友测试');await b.locator('#btn-join-room').click();await b.waitForURL('**/game.html?room=*');
   await a.locator('#btn-start').click();
   for(const page of [a,b]) await page.waitForFunction(()=>gameState?.players?.length===4);
+  for(const page of [a,b]) assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  if(process.env.MAHJONG_SCREENSHOT){await a.screenshot({path:process.env.MAHJONG_SCREENSHOT.replace('.png','-desktop.png')});}
   const va=await a.evaluate(()=>({id:PLAYER_ID,idx:myPlayerIdx,state:gameState}));
   const vb=await b.evaluate(()=>({id:PLAYER_ID,idx:myPlayerIdx,state:gameState}));
   assert.notEqual(va.id,vb.id);assert.equal(va.idx,0);assert.equal(vb.idx,1);
@@ -94,6 +99,8 @@ try {
   });
   assert.equal(await a.locator('#btn-play-again').isEnabled(),true);
   assert.equal(await b.locator('#btn-play-again').isEnabled(),false);
+  await b.waitForFunction(()=>getComputedStyle(document.getElementById('game-over-modal')).opacity==='1');
+  if(process.env.MAHJONG_SCREENSHOT){await b.screenshot({path:process.env.MAHJONG_SCREENSHOT.replace('.png','-result.png')});}
   for (const page of [a,b]) await page.evaluate(()=>document.getElementById('game-over-modal').classList.add('hidden'));
   assert(!(await a.evaluate(()=>document.cookie)).includes('mahjong_guest'));
   assert((await first.cookies()).find(c=>c.name==='mahjong_guest').httpOnly);
