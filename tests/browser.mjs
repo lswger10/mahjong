@@ -52,7 +52,7 @@ try {
     }
     if(process.env.TIDAL_WEB_ROOT && req.url.startsWith('/chat/')) {
       const name=path.basename(new URL(req.url,'http://test').pathname);
-      try { const bytes=readFileSync(path.join(process.env.TIDAL_WEB_ROOT,name));res.setHeader('Content-Type',name.endsWith('.html')?'text/html':name.endsWith('.js')?'application/javascript':'application/octet-stream');res.end(bytes);return;}catch{}
+        try { const bytes=readFileSync(path.join(process.env.TIDAL_WEB_ROOT,name));res.setHeader('Content-Type',name.endsWith('.html')?'text/html':name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'application/octet-stream');res.end(bytes);return;}catch{}
     }
     res.writeHead(404);res.end();
   });

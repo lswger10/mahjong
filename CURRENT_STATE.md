@@ -1,5 +1,12 @@
 # 麻将当前状态
 
+## 2026-10-12 小世界外观（本地、未推送/部署）
+
+`14a7acf` 更新大厅、桌面、手牌操作、房间菜单与结算纸面风格，保留原牌规、
+私牌/席位权限和 HTTP/WS。111 项前端测试及原真实浏览器链路通过，包含实际
+出牌、手机刷新、进程重启恢复、房主重开与娱乐室返回；结算展示用合成 game_over
+事件检查，不冒充完整真人牌局。以下旧 TEST 部署信息仍需发布前重新核验。
+
 2026-09-11。独立麻将子应用，来源 `zorrofox/mahjong@bd3842b37bf80460f273472f6347329cc09d6b06`。
 施工分支 `codex/mahjong-game-room`；主克隆 `D:/Workspace/mahjong`，工作树
 `D:/Workspace/tidal-echo-next/.worktrees/mahjong`。`upstream` 指向原作者仓库；`origin` 指向本轮创建的公开 Fork `lswger10/mahjong`。
